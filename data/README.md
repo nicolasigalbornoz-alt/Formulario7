@@ -1,17 +1,25 @@
 # data/
 
-Los dos Excel de origen van acá, **no se commitean** (están en
-`.gitignore`): tienen cifras reales de presupuesto municipal y el repo es
-público. Solo entran a la base de datos local vía los scripts de
-`scripts/`.
+Los Excel de origen van acá, **no se commitean** (están en `.gitignore`):
+tienen cifras reales de presupuesto municipal y el repo es público. Solo
+entran a la base de datos local vía los scripts de `scripts/`.
 
-## `Libro1.xlsx`
+## `Libro2.xlsx` (fuente de la cuota, reemplaza a `Libro1.xlsx`)
 
-Hoja `Hoja2`, 4 columnas: `Jur.` | `Secretaría` | `Categoría` | `Libre`.
-`Libre` es el techo por Categoría programática dentro de cada Secretaría
-(fuente 110). El techo total por Secretaría no viene en un archivo aparte
--- se deriva como la suma de sus categorías (ver el docstring de
-`scripts/build_cuota_data.py` para la justificación).
+Hoja `Techos`, columnas `Jur.` | `Secretaría` | `Categoría` | `Techo fuente
+110 (F7 + F11)` | `Obras de construcción (F9)` | `Estimación fondo de 131
+(total)`. Trae el techo por Categoría programática para **ambas fuentes**
+(110 en la columna D, 131 en la F) en un solo archivo -- `Libro1.xlsx`
+quedó obsoleto (solo traía 110) y ya no se usa. La columna E "Obras de
+construcción" queda fuera de alcance, igual que antes. El techo total por
+Secretaría no viene en un archivo aparte -- se deriva como la suma de sus
+categorías, por fuente (ver el docstring de `scripts/build_cuota_data.py`).
+
+**Regla de negocio, tal cual la trae el propio Excel** (columna H de la
+hoja): el techo por Categoría es **sugerido**, no bloqueante -- se puede
+compensar una categoría con menos gasto contra otra con más. Lo que **sí
+es un máximo bloqueante es la suma de techos de toda la Secretaría**, por
+fuente. `backend/validations.py` implementa exactamente esto.
 
 ## `formulario 7 2027.xlsx`
 

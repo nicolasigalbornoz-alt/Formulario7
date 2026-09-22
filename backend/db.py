@@ -457,7 +457,7 @@ def anular_formulario(conn, submission_id):
     conn.execute("UPDATE f7_submission SET estado = 'anulado' WHERE id = ?", (submission_id,))
 
 
-def reporte_cuota(conn, anio_fiscal, secretaria_id=None):
+def reporte_cuota(conn, anio_fiscal, fuente, secretaria_id=None):
     sql = """
         SELECT cc.id AS cuota_categoria_id, sc.id AS secretaria_id, sc.nombre AS secretaria,
                cc.categoria, cc.techo,
@@ -471,9 +471,9 @@ def reporte_cuota(conn, anio_fiscal, secretaria_id=None):
             GROUP BY s.secretaria_id, s.categoria, s.fuente, s.anio_fiscal
         ) u ON u.secretaria_id = cc.secretaria_id AND u.categoria = cc.categoria
            AND u.fuente = cc.fuente AND u.anio_fiscal = cc.anio_fiscal
-        WHERE cc.anio_fiscal = ? AND cc.vigente = 1
+        WHERE cc.anio_fiscal = ? AND cc.fuente = ? AND cc.vigente = 1
     """
-    params = [anio_fiscal]
+    params = [anio_fiscal, fuente]
     if secretaria_id is not None:
         sql += " AND cc.secretaria_id = ?"
         params.append(secretaria_id)
@@ -482,7 +482,7 @@ def reporte_cuota(conn, anio_fiscal, secretaria_id=None):
     return [dict(f) for f in filas]
 
 
-def reporte_totales_secretaria(conn, anio_fiscal, secretaria_id=None):
+def reporte_totales_secretaria(conn, anio_fiscal, fuente, secretaria_id=None):
     sql = """
         SELECT sct.id AS secretaria_cuota_total_id, sct.secretaria_id, sc.nombre AS secretaria, sct.monto_total,
                COALESCE((
@@ -493,9 +493,9 @@ def reporte_totales_secretaria(conn, anio_fiscal, secretaria_id=None):
                ), 0) AS usado
         FROM secretaria_cuota_total sct
         JOIN secretaria sc ON sc.id = sct.secretaria_id
-        WHERE sct.anio_fiscal = ? AND sct.vigente = 1
+        WHERE sct.anio_fiscal = ? AND sct.fuente = ? AND sct.vigente = 1
     """
-    params = [anio_fiscal]
+    params = [anio_fiscal, fuente]
     if secretaria_id is not None:
         sql += " AND sct.secretaria_id = ?"
         params.append(secretaria_id)

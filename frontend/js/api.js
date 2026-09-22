@@ -43,6 +43,13 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+function qs(params) {
+  const partes = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+  return partes.length ? `?${partes.join("&")}` : "";
+}
+
 const Api = {
   login: (username, password) =>
     apiFetch("/api/login", { method: "POST", body: JSON.stringify({ username, password }) }),
@@ -51,14 +58,14 @@ const Api = {
 
   secretarias: () => apiFetch("/api/secretarias"),
   catalogo: (q, conPrecio) =>
-    apiFetch(`/api/catalogo?q=${encodeURIComponent(q)}${conPrecio ? "&con_precio=1" : ""}`),
-  misCategorias: (secretariaId) =>
-    apiFetch(`/api/mis-categorias${secretariaId ? `?secretaria_id=${secretariaId}` : ""}`),
+    apiFetch(`/api/catalogo${qs({ q, con_precio: conPrecio ? 1 : undefined })}`),
+  misCategorias: (fuente, secretariaId) =>
+    apiFetch(`/api/mis-categorias${qs({ fuente, secretaria_id: secretariaId })}`),
 
   crearFormulario: (body) =>
     apiFetch("/api/formularios", { method: "POST", body: JSON.stringify(body) }),
   listarFormularios: (secretariaId) =>
-    apiFetch(`/api/formularios${secretariaId ? `?secretaria_id=${secretariaId}` : ""}`),
+    apiFetch(`/api/formularios${qs({ secretaria_id: secretariaId })}`),
   obtenerFormulario: (id) => apiFetch(`/api/formularios/${id}`),
 
   crearUsuario: (body) =>
@@ -69,13 +76,13 @@ const Api = {
 
   anularFormulario: (id) =>
     apiFetch(`/api/admin/formularios/${id}/anular`, { method: "PATCH" }),
-  reporte: (secretariaId) =>
-    apiFetch(`/api/admin/reporte${secretariaId ? `?secretaria_id=${secretariaId}` : ""}`),
-  reporteCsvUrl: (secretariaId) =>
-    `${API_BASE}/api/admin/reporte?formato=csv${secretariaId ? `&secretaria_id=${secretariaId}` : ""}`,
+  reporte: (fuente, secretariaId) =>
+    apiFetch(`/api/admin/reporte${qs({ fuente, secretaria_id: secretariaId })}`),
+  reporteCsvUrl: (fuente, secretariaId) =>
+    `${API_BASE}/api/admin/reporte${qs({ formato: "csv", fuente, secretaria_id: secretariaId })}`,
   actualizarTechoCategoria: (id, techo) =>
     apiFetch(`/api/admin/cuota-categoria/${id}`, { method: "PATCH", body: JSON.stringify({ techo }) }),
   actualizarMontoTotal: (id, monto_total) =>
     apiFetch(`/api/admin/cuota-total/${id}`, { method: "PATCH", body: JSON.stringify({ monto_total }) }),
-  seguimiento: () => apiFetch("/api/admin/seguimiento"),
+  seguimiento: (fuente) => apiFetch(`/api/admin/seguimiento${qs({ fuente })}`),
 };

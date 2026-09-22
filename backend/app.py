@@ -139,10 +139,11 @@ def mis_categorias(usuario):
             return jsonify({"ok": False, "error": "secretaria_id es requerido para el admin."}), 400
     else:
         secretaria_id = usuario["secretaria_id"]
+    fuente = request.args.get("fuente", 110, type=int)
 
     with db.conexion() as conn:
-        categorias = db.listar_categorias_de_secretaria(conn, secretaria_id, 110, ANIO_FISCAL)
-        cuota_total = db.obtener_secretaria_cuota_total(conn, secretaria_id, 110, ANIO_FISCAL)
+        categorias = db.listar_categorias_de_secretaria(conn, secretaria_id, fuente, ANIO_FISCAL)
+        cuota_total = db.obtener_secretaria_cuota_total(conn, secretaria_id, fuente, ANIO_FISCAL)
         fuentes = db.listar_fuentes(conn)
 
     return jsonify({
@@ -188,7 +189,7 @@ def crear_formulario(usuario):
             items = validations.resolver_y_validar_items(conn, items_body, ANIO_FISCAL)
             nuevo_total = round(sum(i["subtotal"] for i in items), 2)
 
-            validations.validar_techos(
+            aviso_categoria = validations.validar_techos(
                 conn, secretaria_id=secretaria_id, categoria=categoria, fuente=fuente,
                 anio_fiscal=ANIO_FISCAL, nuevo_total=nuevo_total, excluir_submission_id=excluir_id,
             )
@@ -210,9 +211,12 @@ def crear_formulario(usuario):
         log.exception("Error inesperado creando formulario")
         return jsonify({"ok": False, "error": "Error inesperado. Revisar la consola del servidor."}), 500
 
-    log.info("Formulario guardado: secretaria=%s categoria=%s fuente=%s total=%s (id=%s)",
-              secretaria_id, categoria, fuente, nuevo_total, submission_id)
-    return jsonify({"ok": True, "id": submission_id, "total": nuevo_total}), 201
+    log.info("Formulario guardado: secretaria=%s categoria=%s fuente=%s total=%s (id=%s)%s",
+              secretaria_id, categoria, fuente, nuevo_total, submission_id,
+              " [supera techo sugerido de categoria]" if aviso_categoria else "")
+    return jsonify({
+        "ok": True, "id": submission_id, "total": nuevo_total, "aviso_categoria": aviso_categoria,
+    }), 201
 
 
 @app.route("/api/formularios", methods=["GET"])
@@ -310,33 +314,40 @@ def anular_formulario_endpoint(usuario, submission_id):
 @auth.admin_required
 def reporte_endpoint(usuario):
     secretaria_id = request.args.get("secretaria_id", type=int)
+    fuente = request.args.get("fuente", 110, type=int)
     formato = request.args.get("formato", "json")
 
     with db.conexion() as conn:
-        categorias = db.reporte_cuota(conn, ANIO_FISCAL, secretaria_id=secretaria_id)
-        totales = db.reporte_totales_secretaria(conn, ANIO_FISCAL, secretaria_id=secretaria_id)
+        categorias = db.reporte_cuota(conn, ANIO_FISCAL, fuente, secretaria_id=secretaria_id)
+        totales = db.reporte_totales_secretaria(conn, ANIO_FISCAL, fuente, secretaria_id=secretaria_id)
 
     if formato == "csv":
         import csv
         import io
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["Secretaria", "Categoria", "Techo", "Usado", "Disponible"])
+        writer.writerow(["Secretaria", "Categoria", "Fuente", "Techo", "Usado", "Disponible"])
         for fila in categorias:
-            writer.writerow([fila["secretaria"], fila["categoria"], fila["techo"], fila["usado"], fila["disponible"]])
+            writer.writerow([fila["secretaria"], fila["categoria"], fuente, fila["techo"], fila["usado"], fila["disponible"]])
         respuesta = app.response_class(buf.getvalue(), mimetype="text/csv")
-        respuesta.headers["Content-Disposition"] = f"attachment; filename=reporte_cuota_{ANIO_FISCAL}.csv"
+        respuesta.headers["Content-Disposition"] = f"attachment; filename=reporte_cuota_{fuente}_{ANIO_FISCAL}.csv"
         return respuesta
 
-    return jsonify({"ok": True, "categorias": categorias, "totales_secretaria": totales, "anio_fiscal": ANIO_FISCAL}), 200
+    return jsonify({
+        "ok": True, "categorias": categorias, "totales_secretaria": totales,
+        "anio_fiscal": ANIO_FISCAL, "fuente": fuente,
+    }), 200
 
 
 @app.route("/api/admin/cuota-categoria/<int:cuota_categoria_id>", methods=["PATCH"])
 @auth.admin_required
 def actualizar_techo_categoria_endpoint(usuario, cuota_categoria_id):
     """Edicion manual del techo por categoria -- para correcciones puntuales
-    sin tener que volver a subir Libro1.xlsx (que igual las pisaria en la
-    proxima reimportacion, eso es esperable y se documenta en db/README.md)."""
+    sin tener que volver a subir Libro2.xlsx (que igual las pisaria en la
+    proxima reimportacion, eso es esperable y se documenta en db/README.md).
+    Este techo es informativo (ver validations.validar_techos), asi que
+    editarlo no bloquea ni desbloquea nada por si solo -- ajusta el aviso
+    que se muestra, y sirve como referencia para el admin."""
     body = request.get_json(silent=True) or {}
     try:
         techo = float(body.get("techo"))
@@ -385,8 +396,9 @@ def seguimiento_endpoint(usuario):
     una carga 'enviada' y cuales faltan -- para saber a quien hay que
     recordarle, sin tener que revisar el reporte de montos categoria por
     categoria."""
+    fuente = request.args.get("fuente", 110, type=int)
     with db.conexion() as conn:
-        filas = db.seguimiento_categorias(conn, 110, ANIO_FISCAL)
+        filas = db.seguimiento_categorias(conn, fuente, ANIO_FISCAL)
 
     por_secretaria = {}
     for f in filas:
@@ -422,6 +434,7 @@ def seguimiento_endpoint(usuario):
             "porcentaje": round(100 * total_cargadas / total_categorias, 1) if total_categorias else 0.0,
         },
         "anio_fiscal": ANIO_FISCAL,
+        "fuente": fuente,
     }), 200
 
 

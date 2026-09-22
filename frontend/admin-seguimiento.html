@@ -12,8 +12,16 @@
 
 <main>
   <div class="card">
-    <h2>Avance general de carga</h2>
-    <p class="card-desc">Categorías con Formulario 7 ya enviado, sobre el total de categorías con cuota asignada (Fuente 110).</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Avance general de carga</h2>
+        <p class="card-desc">Categorías con Formulario 7 ya enviado, sobre el total de categorías con cuota asignada.</p>
+      </div>
+      <select id="sel-fuente" style="min-width:140px;">
+        <option value="110">Fuente 110</option>
+        <option value="131">Fuente 131</option>
+      </select>
+    </div>
     <div id="resumen-general"></div>
   </div>
 

@@ -8,6 +8,7 @@
   const tbodyTotales = document.getElementById("tbody-totales");
   const tbodyCategorias = document.getElementById("tbody-categorias");
   const selSecretaria = document.getElementById("sel-secretaria");
+  const selFuente = document.getElementById("sel-fuente");
   const linkCsv = document.getElementById("link-csv");
 
   let secretariaFiltro = "";
@@ -21,7 +22,8 @@
   async function cargarReporte() {
     limpiarAlerta(alertaTotales);
     limpiarAlerta(alertaCategorias);
-    const { categorias, totales_secretaria } = await Api.reporte(secretariaFiltro || undefined);
+    const fuente = Number(selFuente.value);
+    const { categorias, totales_secretaria } = await Api.reporte(fuente, secretariaFiltro || undefined);
 
     tbodyTotales.innerHTML = totales_secretaria.map(t => `
       <tr>
@@ -32,7 +34,9 @@
       </tr>
     `).join("");
 
-    tbodyCategorias.innerHTML = categorias.map(c => `
+    tbodyCategorias.innerHTML = categorias.length === 0
+      ? `<tr><td colspan="5" class="card-desc">Sin categorías en esta fuente.</td></tr>`
+      : categorias.map(c => `
       <tr>
         <td>${escapeHtml(c.secretaria)}</td>
         <td>${c.categoria}</td>
@@ -42,7 +46,7 @@
       </tr>
     `).join("");
 
-    linkCsv.href = Api.reporteCsvUrl(secretariaFiltro || undefined);
+    linkCsv.href = Api.reporteCsvUrl(fuente, secretariaFiltro || undefined);
   }
 
   function empezarEdicion(celda) {
@@ -100,6 +104,7 @@
     secretariaFiltro = selSecretaria.value;
     cargarReporte();
   });
+  selFuente.addEventListener("change", cargarReporte);
 
   await cargarSecretarias();
   await cargarReporte();

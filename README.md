@@ -7,7 +7,7 @@ en vez de conciliarse después contra el Excel.
 
 Reemplaza el flujo actual: cada área completaba `formulario 7 2027.xlsx` a
 mano y lo mandaba por mail a `dir.presupuesto@moron.gob.ar`, y recién ahí se
-chequeaba contra la cuota asignada (`Libro1.xlsx`).
+chequeaba contra la cuota asignada (`Libro2.xlsx`).
 
 ## Cómo está armado
 
@@ -17,20 +17,20 @@ chequeaba contra la cuota asignada (`Libro1.xlsx`).
   Pagv2.
 - **Frontend**: HTML/CSS/JS plano (`frontend/`), sin framework.
 - **Datos de referencia** (`data/`, no se commitean -- ver `data/README.md`):
-  `Libro1.xlsx` (cuota/techo) y `formulario 7 2027.xlsx` (catálogo de
-  bienes), importados a la base con los scripts de `scripts/`.
+  `Libro2.xlsx` (cuota/techo, ambas fuentes) y `formulario 7 2027.xlsx`
+  (catálogo de bienes), importados a la base con los scripts de `scripts/`.
 
-Fuente de financiamiento: solo **110** está activa (es todo lo que trae
-`Libro1.xlsx` hoy). La **131** ya tiene su lugar en el modelo de datos y en
-la interfaz (aparece deshabilitada, "próximamente") -- para activarla el día
-que haya un archivo de cuota propio: agregar sus filas a la tabla
-`fuente_financiamiento` (`activa=1`) y correr `build_cuota_data.py` con los
-datos de esa fuente.
+Fuentes de financiamiento **110 y 131 están activas**, ambas con techo
+propio por Categoría y por Secretaría (`Libro2.xlsx` las trae juntas).
+Regla de negocio (tal cual la trae el propio Excel, ver `data/README.md`):
+el techo **por Categoría es sugerido** -- se puede compensar gastando de
+más en una y de menos en otra dentro de la misma Secretaría -- y el que
+**sí bloquea el envío es el total por Secretaría** (y por fuente).
 
 ## Levantar todo localmente
 
 1. `pip install -r requirements.txt`
-2. Copiar `Libro1.xlsx` y `formulario 7 2027.xlsx` a `data/` (ver `data/README.md`)
+2. Copiar `Libro2.xlsx` y `formulario 7 2027.xlsx` a `data/` (ver `data/README.md`)
 3. Crear la base:
    ```bash
    python -c "import sqlite3,pathlib; c=sqlite3.connect('db/formulario7.db'); c.executescript(pathlib.Path('db/schema.sql').read_text(encoding='utf-8')); c.commit()"
@@ -60,25 +60,25 @@ fija y lo avisa por log.
 
 - `GET/POST /api/formularios`: un área carga o reemplaza el Formulario 7 de
   una (Categoría × Fuente) suya. El servidor recalcula el total, revalida
-  que cada fila esté completa, y bloquea el envío si se supera el techo de
-  la categoría o el total de la Secretaría (devuelve cuánto hay disponible
+  que cada fila esté completa, avisa (sin bloquear) si se supera el techo
+  sugerido de la categoría, y bloquea el envío solo si se supera el total
+  permitido de la Secretaría en esa fuente (devuelve cuánto hay disponible
   y cuánto se pidió).
 - `PATCH /api/admin/cuota-categoria/<id>` y `.../cuota-total/<id>`: el admin
   corrige un techo a mano sin tener que volver a subir el Excel. **Ojo**: la
-  próxima vez que se corra `build_cuota_data.py` con `Libro1.xlsx`, ese
+  próxima vez que se corra `build_cuota_data.py` con `Libro2.xlsx`, ese
   Excel vuelve a pisar el valor -- es la fuente de verdad de origen. Una
   edición manual pensada para durar tiene que reflejarse también ahí.
-- `GET /api/admin/seguimiento`: panel de avance -- por Secretaría, cuántas
-  de sus categorías ya tienen una carga enviada y cuáles faltan.
+- `GET /api/admin/seguimiento`: panel de avance -- por Secretaría y fuente,
+  cuántas de sus categorías ya tienen una carga enviada y cuáles faltan.
 - `GET /api/admin/reporte`: cuota usada/disponible por categoría y por
-  Secretaría, con export a CSV.
+  Secretaría (por fuente), con export a CSV.
 
 Ver `db/README.md` para el detalle del esquema y `data/README.md` para el
-formato esperado de los dos Excel de origen.
+formato esperado de los Excel de origen.
 
 ## Pendiente (fuera de alcance de esta primera versión)
 
-- Integrar la fuente 131 cuando exista su archivo de cuota.
 - Que un usuario de área pueda cambiar su propia contraseña (hoy solo el
   admin la resetea).
 - Selector de año fiscal (hoy `ANIO_FISCAL` es una constante en `backend/app.py`, 2027).

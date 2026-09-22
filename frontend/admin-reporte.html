@@ -12,8 +12,16 @@
 
 <main>
   <div class="card">
-    <h2>Totales por Secretaría</h2>
-    <p class="card-desc">Hacé clic sobre un monto para editarlo.</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Totales por Secretaría</h2>
+        <p class="card-desc">Hacé clic sobre un monto para editarlo.</p>
+      </div>
+      <select id="sel-fuente" style="min-width:140px;">
+        <option value="110">Fuente 110</option>
+        <option value="131">Fuente 131</option>
+      </select>
+    </div>
     <div id="alerta-totales"></div>
     <table>
       <thead><tr><th>Secretaría</th><th class="num">Cuota total</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>

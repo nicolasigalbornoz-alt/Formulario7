@@ -3,10 +3,13 @@
   if (!usuario) return;
   montarHeader(usuario, "");
 
+  let fuenteActual = 110;
   let categorias = [];          // [{categoria, techo, submission_id, usado, submitted_at}]
+  let cuotaTotalSecretaria = null; // {monto_total, ...} o null si esta fuente no tiene nada asignado
   let categoriaSeleccionada = null;
   let items = [];               // [{tipo, catalogo_id, codigo, denominacion, unidad_medida, cantidad, precio_unitario}]
 
+  const selFuente = document.getElementById("sel-fuente");
   const selCategoria = document.getElementById("sel-categoria");
   const infoCategoria = document.getElementById("info-categoria");
   const cardItems = document.getElementById("card-items");
@@ -20,21 +23,69 @@
   const btnAgregarEspecial = document.getElementById("btn-agregar-especial");
   const btnEnviar = document.getElementById("btn-enviar");
   const tbodyMisCargas = document.getElementById("tbody-mis-cargas");
+  const resumenSecretaria = document.getElementById("resumen-secretaria");
+
+  function actualizarEtiquetasFuente() {
+    document.querySelectorAll("#fuente-actual-label, #fuente-actual-label-2").forEach(el => {
+      el.textContent = `-- Fuente ${fuenteActual}`;
+    });
+  }
 
   async function cargarCategorias() {
-    const data = await Api.misCategorias();
+    fuenteActual = Number(selFuente.value);
+    actualizarEtiquetasFuente();
+    categoriaSeleccionada = null;
+    cardItems.hidden = true;
+    selCategoria.innerHTML = "";
+
+    const data = await Api.misCategorias(fuenteActual);
     categorias = data.categorias;
-    // El numero que se muestra es siempre el techo (el tope que valida el
-    // servidor), no techo-usado: una categoria "ya cargada" se REEMPLAZA al
-    // reenviar, no se le suma -- mostrar "disponible" como techo-usado ahi
-    // confundiria (pareceria que queda menos margen del que en realidad hay).
-    selCategoria.innerHTML = `<option value="">-- Elegir categoría --</option>` + categorias.map(c =>
-      `<option value="${c.categoria}">${c.categoria} -- techo ${formatoPesos(c.techo)}${c.submission_id ? " (ya cargada)" : ""}</option>`
-    ).join("");
+    cuotaTotalSecretaria = data.cuota_total;
+
+    if (categorias.length === 0) {
+      selCategoria.innerHTML = `<option value="">-- Tu Secretaría no tiene categorías en esta fuente --</option>`;
+    } else {
+      // El numero que se muestra es siempre el techo (el tope sugerido),
+      // no techo-usado: una categoria "ya cargada" se REEMPLAZA al
+      // reenviar, no se le suma.
+      selCategoria.innerHTML = `<option value="">-- Elegir categoría --</option>` + categorias.map(c =>
+        `<option value="${c.categoria}">${c.categoria} -- techo sugerido ${formatoPesos(c.techo)}${c.submission_id ? " (ya cargada)" : ""}</option>`
+      ).join("");
+    }
     renderMisCargas();
+    renderResumenSecretaria();
+  }
+
+  function renderResumenSecretaria() {
+    if (!cuotaTotalSecretaria) {
+      resumenSecretaria.innerHTML = `<div class="alerta alerta-warn">Tu Secretaría no tiene un total asignado en la fuente ${fuenteActual}.</div>`;
+      return;
+    }
+    const usado = categorias.reduce((acc, c) => acc + c.usado, 0);
+    const techo = cuotaTotalSecretaria.monto_total;
+    const porcentaje = techo > 0 ? Math.min(100, Math.round((usado / techo) * 1000) / 10) : 0;
+    resumenSecretaria.innerHTML = `
+      <div class="resumen-total">
+        <div>
+          <div style="font-size:12.5px;color:var(--text-muted);">Usado</div>
+          <div class="monto ${usado > techo ? "excedido" : ""}">${formatoPesos(usado)}</div>
+        </div>
+        <div style="flex:1; margin:0 24px;">
+          <div class="barra"><div class="barra-relleno ${porcentaje >= 100 ? "completo" : ""}" style="width:${porcentaje}%"></div></div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:12.5px;color:var(--text-muted);">Total permitido</div>
+          <div class="monto">${formatoPesos(techo)}</div>
+        </div>
+      </div>
+    `;
   }
 
   function renderMisCargas() {
+    if (categorias.length === 0) {
+      tbodyMisCargas.innerHTML = `<tr><td colspan="5" class="card-desc">Sin categorías en esta fuente.</td></tr>`;
+      return;
+    }
     tbodyMisCargas.innerHTML = categorias.map(c => `
       <tr>
         <td>${c.categoria}</td>
@@ -119,10 +170,9 @@
     const total = items.reduce((acc, it) => acc + subtotal(it), 0);
     montoTotalEl.textContent = formatoPesos(total);
     if (categoriaSeleccionada) {
-      // El techo es el limite directo de ESTA carga: "usado" es lo que ya
-      // tiene cargado esta misma categoria (si la esta reeditando), y un
-      // reenvio reemplaza esos items en vez de sumarse a ellos -- por eso
-      // el numero a no superar es el techo entero, no techo-usado.
+      // El techo por categoria es SUGERIDO (no bloquea) -- el color rojo es
+      // solo una senal visual, el servidor solo rechaza si se supera el
+      // total de la Secretaria (ver resumen-secretaria mas arriba).
       montoDisponibleEl.textContent = formatoPesos(categoriaSeleccionada.techo);
       montoTotalEl.classList.toggle("excedido", total > categoriaSeleccionada.techo);
     }
@@ -209,7 +259,7 @@
     try {
       const body = {
         categoria: categoriaSeleccionada.categoria,
-        fuente: 110,
+        fuente: fuenteActual,
         subjurisdiccion: document.getElementById("in-subjurisdiccion").value.trim() || null,
         programa: document.getElementById("in-programa").value.trim() || null,
         items: items.map(it => ({
@@ -219,15 +269,22 @@
         })),
       };
       const resultado = await Api.crearFormulario(body);
-      mostrarAlerta(alertaForm, `Formulario enviado. Total: ${formatoPesos(resultado.total)}.`, "ok");
+      if (resultado.aviso_categoria) {
+        mostrarAlerta(alertaForm,
+          `Formulario enviado. Total: ${formatoPesos(resultado.total)}. `
+          + `Atención: superaste el techo sugerido de esta categoría (sugerido ${formatoPesos(resultado.aviso_categoria.techo_categoria)}) -- `
+          + `se guardó igual porque el total de tu Secretaría sigue dentro de lo permitido.`, "warn");
+      } else {
+        mostrarAlerta(alertaForm, `Formulario enviado. Total: ${formatoPesos(resultado.total)}.`, "ok");
+      }
+      const categoriaEnviada = categoriaSeleccionada.categoria;
       await cargarCategorias();
-      selCategoria.value = categoriaSeleccionada.categoria;
+      selCategoria.value = categoriaEnviada;
       await alSeleccionarCategoria();
     } catch (err) {
       if (err.status === 409) {
-        const nivel = err.payload.nivel === "secretaria" ? "el total de la Secretaría" : "esta categoría";
         mostrarAlerta(alertaForm,
-          `Esta carga supera la cuota disponible para ${nivel}: disponible ${formatoPesos(err.payload.disponible)}, `
+          `Esta carga supera el total permitido de tu Secretaría: disponible ${formatoPesos(err.payload.disponible)}, `
           + `solicitado ${formatoPesos(err.payload.solicitado)}. Ajustá las cantidades e intentá de nuevo.`, "error");
       } else if (err.status === 400 && err.payload.fila !== undefined) {
         mostrarAlerta(alertaForm, `Fila ${err.payload.fila + 1}: ${err.message}`, "error");
@@ -241,6 +298,7 @@
   });
 
   selCategoria.addEventListener("change", alSeleccionarCategoria);
+  selFuente.addEventListener("change", cargarCategorias);
 
   await cargarCategorias();
 })();

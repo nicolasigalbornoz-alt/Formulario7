@@ -26,7 +26,8 @@ class ValidacionError(Exception):
 
 
 class TechoExcedidoError(Exception):
-    """Se traduce a 409. `nivel` es 'categoria' o 'secretaria'."""
+    """Se traduce a 409. `nivel` siempre es 'secretaria' -- el techo por
+    categoria es sugerido, no bloqueante (ver validar_techos)."""
     def __init__(self, nivel, disponible, solicitado):
         super().__init__(f"Supera el techo de {nivel}: disponible {disponible}, solicitado {solicitado}")
         self.nivel = nivel
@@ -129,24 +130,34 @@ def resolver_y_validar_items(conn, items_body, anio_fiscal):
 
 
 def validar_techos(conn, *, secretaria_id, categoria, fuente, anio_fiscal, nuevo_total, excluir_submission_id):
-    """Nivel 1 (categoria) y nivel 2 (Secretaria), en ese orden -- corta en
-    el primero que falle. Ver plan: el techo de categoria solo mira el total
-    de ESTA carga porque el UNIQUE de f7_submission garantiza que nunca hay
-    mas de una carga enviada para la misma combinacion Secretaria+Categoria+
-    Fuente+anio."""
+    """El techo por Categoria es SUGERIDO, no bloqueante -- son las propias
+    notas de Libro2.xlsx (hoja "Techos"): "Los techos por categoria son
+    SUGERIDOS... Pueden compensarse categorias de menos con categorias de
+    mas". Lo unico que bloquea es la suma por Secretaria y Fuente ("LA
+    SUMA... ES EL MONTO MAXIMO PERMITIDO"). Por eso esta funcion nunca
+    lanza TechoExcedidoError por categoria -- devuelve un aviso informativo
+    (o None) para que el llamador lo pueda mostrar igual, y solo lanza
+    (bloquea) cuando se supera el techo de Secretaria.
+
+    El total de categoria a comparar es solo el de ESTA carga porque el
+    UNIQUE de f7_submission garantiza que nunca hay mas de una carga
+    enviada para la misma combinacion Secretaria+Categoria+Fuente+anio."""
     cuota_cat = db.obtener_cuota_categoria(conn, secretaria_id, categoria, fuente, anio_fiscal)
     if cuota_cat is None:
-        raise ValidacionError("Esa categoria no tiene cuota asignada para esta Secretaria.")
+        raise ValidacionError("Esa categoria no tiene cuota asignada para esta Secretaria en esta fuente.")
     techo_categoria = float(cuota_cat["techo"])
+    aviso_categoria = None
     if nuevo_total > techo_categoria:
-        raise TechoExcedidoError("categoria", techo_categoria, nuevo_total)
+        aviso_categoria = {"techo_categoria": techo_categoria, "solicitado": nuevo_total}
 
     cuota_total = db.obtener_secretaria_cuota_total(conn, secretaria_id, fuente, anio_fiscal)
     if cuota_total is None:
-        raise ValidacionError("Esta Secretaria no tiene cuota total asignada.")
+        raise ValidacionError("Esta Secretaria no tiene cuota total asignada en esta fuente.")
     usado_otras = float(db.calcular_usado_secretaria(
         conn, secretaria_id, fuente, anio_fiscal, excluir_submission_id=excluir_submission_id
     ))
     monto_total = float(cuota_total["monto_total"])
     if usado_otras + nuevo_total > monto_total:
         raise TechoExcedidoError("secretaria", monto_total - usado_otras, nuevo_total)
+
+    return aviso_categoria
