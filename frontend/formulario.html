@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Carga</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="instructivo">
+    <strong>Cómo completar el Formulario 7</strong>
+    <ul>
+      <li>Elegí la <strong>Categoría programática</strong> que vas a cargar -- cada una tiene su propia cuota disponible.</li>
+      <li>Los bienes que ya tienen un precio cargado por Presupuesto se agregan con <strong>«Agregar bien del listado»</strong>: elegís el nombre y el sistema completa código, unidad y precio solo. Vos cargás la cantidad.</li>
+      <li>Los bienes sin precio asignado, o que no están en el listado, se agregan con <strong>«Agregar ítem especial»</strong>: ahí cargás vos todos los datos, incluido el precio.</li>
+      <li>Las cantidades van siempre en <strong>números enteros</strong> (sin decimales).</li>
+      <li>Toda fila que cargues tiene que tener <strong>todos sus datos completos</strong> -- si falta algo, el sistema te lo va a señalar antes de dejarte enviar.</li>
+      <li>El total no puede superar la cuota disponible de la categoría ni el total de la Secretaría -- si se supera, el envío se bloquea y se indica cuánto hay disponible.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Categoría a cargar</h2>
+    <p class="card-desc">Fuente de financiamiento 110. La fuente 131 todavía no está habilitada.</p>
+    <div class="grid-2">
+      <div class="campo">
+        <label for="sel-categoria">Categoría programática</label>
+        <select id="sel-categoria"></select>
+      </div>
+      <div class="campo">
+        <label for="sel-fuente">Fuente de financiamiento</label>
+        <select id="sel-fuente">
+          <option value="110">110</option>
+          <option value="131" disabled>131 (próximamente)</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="campo">
+        <label for="in-subjurisdiccion">Subjurisdicción (referencia, opcional)</label>
+        <input type="text" id="in-subjurisdiccion" placeholder="Ej. 1110111000">
+      </div>
+      <div class="campo">
+        <label for="in-programa">Programa o Actividades centrales (opcional)</label>
+        <input type="text" id="in-programa">
+      </div>
+    </div>
+    <div id="info-categoria"></div>
+  </div>
+
+  <div class="card" id="card-items" hidden>
+    <h2>Ítems</h2>
+    <div id="alerta-form"></div>
+
+    <div class="campo autocomplete">
+      <label for="buscar-bien">Agregar bien del listado (común)</label>
+      <input type="text" id="buscar-bien" placeholder="Escribí el nombre del bien... (ej. arroz)" autocomplete="off">
+      <div class="autocomplete-lista" id="lista-sugerencias" hidden></div>
+    </div>
+    <button type="button" class="btn btn-secundario btn-chico" id="btn-agregar-especial">+ Agregar ítem especial</button>
+
+    <div id="filas-items" style="margin-top:14px;"></div>
+
+    <div class="resumen-total">
+      <div>
+        <div style="font-size:12.5px;color:var(--text-muted);">Total de esta carga</div>
+        <div class="monto" id="monto-total">$0</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:12.5px;color:var(--text-muted);">Cuota disponible en <span id="cat-actual"></span></div>
+        <div class="monto" id="monto-disponible">--</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px; text-align:right;">
+      <button type="button" class="btn btn-primary" id="btn-enviar">Enviar Formulario 7</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Mis cargas</h2>
+    <p class="card-desc">Estado de las categorías de tu Secretaría.</p>
+    <table>
+      <thead><tr><th>Categoría</th><th class="num">Cuota</th><th class="num">Usado</th><th>Estado</th><th>Última carga</th></tr></thead>
+      <tbody id="tbody-mis-cargas"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/formulario.js"></script>
+</body>
+</html>

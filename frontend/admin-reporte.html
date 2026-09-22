@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Reporte de cuota</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="card">
+    <h2>Totales por Secretaría</h2>
+    <p class="card-desc">Hacé clic sobre un monto para editarlo.</p>
+    <div id="alerta-totales"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th class="num">Cuota total</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>
+      <tbody id="tbody-totales"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Detalle por Categoría</h2>
+        <p class="card-desc">Hacé clic sobre el techo para editarlo.</p>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="sel-secretaria" style="min-width:220px;"></select>
+        <a class="btn btn-secundario btn-chico" id="link-csv" href="#" download>Exportar CSV</a>
+      </div>
+    </div>
+    <div id="alerta-categorias"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th>Categoría</th><th class="num">Techo</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>
+      <tbody id="tbody-categorias"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/admin-reporte.js"></script>
+</body>
+</html>

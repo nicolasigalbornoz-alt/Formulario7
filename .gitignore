@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Datos reales: no se commitean (cifras de presupuesto municipal, repo público)
+data/*.xlsx
+data/*.xls
+~$*.xlsx
+db/*.db
+db/*.db-journal
+
+# Locales / editor
+.DS_Store
+*.log
