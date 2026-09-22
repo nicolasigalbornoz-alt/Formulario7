@@ -462,4 +462,17 @@ if __name__ == "__main__":
     # browser (se detecto en la prueba manual: una segunda pestana/fetch
     # quedaba esperando indefinidamente). db.py ya protege la unica seccion
     # de escritura sensible (guardar_formulario) con un Lock propio.
-    app.run(host="127.0.0.1", port=puerto, debug=False, threaded=True)
+    #
+    # host "::", no "127.0.0.1" ni "0.0.0.0": bindear solo a 127.0.0.1 (IPv4)
+    # causaba que el login fallara en el navegador real cuando el sistema
+    # resuelve "localhost" a ::1 (IPv6) primero -- el frontend (python -m
+    # http.server, que escucha en "::") cargaba bien, pero el fetch al
+    # backend se caia con "No se pudo conectar" (se detecto asi: puerto 8890
+    # escuchando en "::", puerto 5190 solo en "127.0.0.1", via
+    # Get-NetTCPConnection). "0.0.0.0" tampoco alcanza: en Windows es
+    # IPv4-only, "::1" seguia sin responder incluso con ese bind (probado).
+    # "::" es dual-stack en Windows por default (IPV6_V6ONLY=0) y cubre
+    # IPv4 + IPv6 en todas las interfaces con un solo bind -- mismo
+    # comportamiento que ya tenia el server estatico del frontend.
+    host = os.environ.get("HOST", "::")
+    app.run(host=host, port=puerto, debug=False, threaded=True)
