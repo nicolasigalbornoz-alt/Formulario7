@@ -523,6 +523,19 @@ class SubidaADrive(unittest.TestCase):
             self.assertIsNone(integrations.subir_a_drive("a.xlsx", b"1"))
 
 
+class Cors(unittest.TestCase):
+    def test_acepta_cada_origen_configurado_y_ninguno_mas(self):
+        origenes = ("https://nicolasigalbornoz-alt.github.io", "https://formulario7.moron-suministros.workers.dev")
+        cliente = app_module.app.test_client()
+        with mock.patch.object(app_module, "FRONTEND_ORIGINS", origenes):
+            for origen in origenes:
+                resp = cliente.options("/api/login", headers={"Origin": origen})
+                self.assertEqual(resp.headers["Access-Control-Allow-Origin"], origen)
+            resp = cliente.options("/api/login", headers={"Origin": "https://otro-sitio.example"})
+            self.assertEqual(resp.headers["Access-Control-Allow-Origin"], origenes[0])
+            self.assertEqual(resp.headers["Vary"], "Origin")
+
+
 class Esquema(unittest.TestCase):
     def test_base_vieja_recibe_las_tablas_nuevas_sin_perder_datos(self):
         with tempfile.TemporaryDirectory() as tmp:
