@@ -119,7 +119,7 @@ Solo sirve archivos estáticos; llama a lo que diga `API_BASE` en
 `frontend/js/api.js`.
 
 También está publicado en Cloudflare (Worker de solo archivos estáticos):
-https://formulario7.moron-suministros.workers.dev/. Se subió a mano el
+https://formulario7.moron-presupuesto.workers.dev/. Se subió a mano el
 contenido de `frontend/`, así que **no se actualiza solo**: después de cada
 cambio en la página hay que volver a subirlo. El backend acepta los dos
 orígenes (`FRONTEND_ORIGIN` con los dos, separados por coma).

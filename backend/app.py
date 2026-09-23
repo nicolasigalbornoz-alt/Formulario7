@@ -15,7 +15,7 @@ Variables de entorno:
     PORT              puerto (default 5190)
     SECRET_KEY        no se usa para la sesion (ver auth.py), pero Flask la pide igual; cualquier valor sirve
     FRONTEND_ORIGIN   origenes exactos permitidos por CORS, separados por coma (default http://localhost:8890;
-                      p. ej. "https://nicolasigalbornoz-alt.github.io,https://formulario7.moron-suministros.workers.dev")
+                      p. ej. "https://nicolasigalbornoz-alt.github.io,https://formulario7.moron-presupuesto.workers.dev")
     FORMULARIO7_DB_PATH    ubicacion de la base SQLite (default db/formulario7.db)
     FORMULARIO7_CARGAS_DIR donde se guarda una copia de cada Excel aprobado (default cargas/)
     FUENTES_HABILITADAS    fuentes de financiamiento que se muestran y se aceptan en el Excel,
