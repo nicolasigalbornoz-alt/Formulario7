@@ -14,6 +14,7 @@
   const linkCsv = document.getElementById("link-csv");
 
   let secretariaFiltro = "";
+  let fuenteActual = 110;
 
   async function cargarSecretarias() {
     limpiarAlerta(alertaSecretarias);
@@ -33,6 +34,7 @@
     limpiarAlerta(alertaTotales);
     limpiarAlerta(alertaCategorias);
     const fuente = Number(selFuente.value);
+    fuenteActual = fuente;
     const { categorias, totales_secretaria } = await Api.reporte(fuente, secretariaFiltro || undefined);
 
     tbodyTotales.innerHTML = totales_secretaria.map(t => `
@@ -56,7 +58,6 @@
       </tr>
     `).join("");
 
-    linkCsv.href = Api.reporteCsvUrl(fuente, secretariaFiltro || undefined);
   }
 
   function empezarEdicion(celda) {
@@ -129,6 +130,12 @@
   });
   selFuente.addEventListener("change", cargarReporte);
 
+  linkCsv.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    Api.descargarReporteCsv(fuenteActual, secretariaFiltro || undefined);
+  });
+
+  await cargarSelectorFuentes(selFuente);
   await cargarSecretarias();
   await cargarReporte();
 })();

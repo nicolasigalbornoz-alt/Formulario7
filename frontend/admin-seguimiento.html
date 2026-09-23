@@ -19,7 +19,6 @@
       </div>
       <select id="sel-fuente" style="min-width:140px;">
         <option value="110">Fuente 110</option>
-        <option value="131">Fuente 131</option>
       </select>
     </div>
     <div id="resumen-general"></div>
@@ -40,6 +39,29 @@
       </thead>
       <tbody id="tbody-seguimiento"></tbody>
     </table>
+  </div>
+
+  <div class="card">
+    <h2>Últimos Excel subidos</h2>
+    <p class="card-desc">Cada Excel que suben las áreas, aprobado o rechazado -- lo mismo que se avisa por mail. <span id="estado-integraciones"></span></p>
+    <div id="alerta-cargas"></div>
+    <div class="tabla-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Secretaría</th>
+            <th>Categoría</th>
+            <th>Archivo</th>
+            <th>Resultado</th>
+            <th class="num">Total</th>
+            <th>Drive</th>
+            <th>Mail</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-cargas"></tbody>
+      </table>
+    </div>
   </div>
 </main>
 

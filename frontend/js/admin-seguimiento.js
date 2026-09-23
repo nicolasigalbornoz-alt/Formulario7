@@ -54,6 +54,45 @@
     }
   }
 
+  const alertaCargas = document.getElementById("alerta-cargas");
+  const tbodyCargas = document.getElementById("tbody-cargas");
+  const estadoIntegraciones = document.getElementById("estado-integraciones");
+
+  async function cargarExcels() {
+    limpiarAlerta(alertaCargas);
+    try {
+      const { cargas, mail_configurado, drive_configurado } = await Api.cargasExcel(50);
+      estadoIntegraciones.textContent = [
+        mail_configurado ? "" : "El envío de mails no está configurado en el servidor.",
+        drive_configurado ? "" : "Drive no está configurado: los aprobados quedan solo en el servidor.",
+      ].filter(Boolean).join(" ");
+
+      if (cargas.length === 0) {
+        tbodyCargas.innerHTML = `<tr><td colspan="8" class="card-desc">Todavía no se subió ningún Excel.</td></tr>`;
+        return;
+      }
+      tbodyCargas.innerHTML = cargas.map(c => `
+        <tr>
+          <td>${formatoFecha(c.subido_en)}</td>
+          <td>${escapeHtml(c.secretaria)}<div class="dato-chico">${escapeHtml(c.subido_por_username)}</div></td>
+          <td>${escapeHtml(c.categoria)}</td>
+          <td>${escapeHtml(c.nombre_archivo)}</td>
+          <td>${c.estado === "aprobado"
+            ? '<span class="badge badge-ok">Aprobado</span>'
+            : `<span class="badge badge-error">Rechazado</span> <span class="dato-chico">${c.cantidad_errores} error(es)</span>`}</td>
+          <td class="num">${c.total != null ? formatoPesos(c.total) : "--"}</td>
+          <td>${c.drive_link && c.drive_link.startsWith("https://")
+            ? `<a href="${escapeHtml(c.drive_link)}" target="_blank" rel="noopener">Abrir</a>`
+            : "--"}</td>
+          <td>${c.mail_enviado_en ? "Enviado" : "--"}</td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      mostrarAlerta(alertaCargas, escapeHtml(err.message));
+    }
+  }
+
   selFuente.addEventListener("change", cargar);
-  await cargar();
+  await cargarSelectorFuentes(selFuente);
+  await Promise.all([cargar(), cargarExcels()]);
 })();

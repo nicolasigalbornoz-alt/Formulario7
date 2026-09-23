@@ -17,18 +17,18 @@ Excel, filas 3 a 5):
   "Pueden compensarse categorías de menos con categorías de más, pero la
    suma de las subjurisdicciones NO PUEDE SUPERAR la suma de los techos
    aquí expuestos."
-Es decir: el techo por Categoría es una sugerencia (el backend la usa para
-avisar, no para bloquear); lo que sí bloquea es la suma por Secretaría y
-Fuente. Ver backend/validations.py.
+Esas notas quedaron viejas: la regla vigente es que los dos techos bloquean
+la carga -- el de cada Categoría y la suma por Secretaría y Fuente. Ver
+backend/validations.py.
 
 Una categoría sin techo en una fuente (columna en 0) simplemente no genera
 fila en cuota_categoria para esa fuente -- por ejemplo HCD no tiene ninguna
 categoría financiada por 131 en los datos actuales, y no aparecerá en el
 selector de categorías de un usuario de HCD cuando elija fuente 131.
 
-Al importar, esta corrida también activa la fuente 131
-(`fuente_financiamiento.activa = 1`) -- hasta ahora quedaba deshabilitada
-en la interfaz por no haber de dónde sacar su techo.
+Los techos de la 131 se importan igual, pero importar no la habilita: qué
+fuentes se muestran y se aceptan lo decide FUENTES_HABILITADAS del backend
+(por defecto solo la 110; ver backend/app.py).
 
 Idempotente, mismo criterio que siempre: upsert por clave natural
 (Secretaría+Categoría+Fuente+año), lo que desaparece del Excel en una
@@ -114,8 +114,6 @@ def importar(anio_fiscal, archivo, conn):
                 monto_total=round(monto_total, 2),
             )
 
-    conn.execute("UPDATE fuente_financiamiento SET activa = 1 WHERE id = 131")
-
     return {
         "secretarias": len(secretarias_vistas),
         "categorias_110": categorias_por_fuente[110],
@@ -140,8 +138,7 @@ def main():
 
     print(f"Año {args.anio}: {resumen['secretarias']} secretarías -- "
           f"fuente 110: {resumen['categorias_110']} categorías / {resumen['totales_110']} totales de secretaría; "
-          f"fuente 131: {resumen['categorias_131']} categorías / {resumen['totales_131']} totales de secretaría. "
-          f"Fuente 131 activada.")
+          f"fuente 131: {resumen['categorias_131']} categorías / {resumen['totales_131']} totales de secretaría.")
 
 
 if __name__ == "__main__":

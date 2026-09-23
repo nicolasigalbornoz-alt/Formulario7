@@ -10,6 +10,8 @@ data/*.xls
 db/*.db
 db/*.db-journal
 exports/
+# Copias de los Excel aprobados que suben las areas (ver FORMULARIO7_CARGAS_DIR)
+cargas/
 
 # Locales / editor
 .DS_Store

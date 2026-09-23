@@ -1,8 +1,11 @@
 """
 Backend de Formulario7: Flask + SQLite (db/formulario7.db), sin build step,
-mismo espiritu que Pagv2/backend-local/app.py. Login real (auth.py),
-cuota validada server-side en dos niveles -- categoria y Secretaria
-(validations.py) -- con bloqueo duro si se supera el techo.
+mismo espiritu que Pagv2/backend-local/app.py. Login real (auth.py). Cada
+area carga su Formulario 7 subiendo el Excel oficial de cada Categoria:
+se valida entero (excel_import.py: filas completas y precios;
+validations.py: techo de la Categoria y total de la Secretaria) y solo si
+pasa todo se registra y se guarda en Drive; si no, se rechaza con la lista
+de errores. Los dos casos se avisan por mail (integrations.py).
 
 Uso:
     python backend/app.py
@@ -10,23 +13,38 @@ Por defecto escucha en http://localhost:5190
 
 Variables de entorno:
     PORT              puerto (default 5190)
-    SECRET_KEY        clave para firmar la cookie de sesion (OBLIGATORIA fuera de desarrollo)
+    SECRET_KEY        no se usa para la sesion (ver auth.py), pero Flask la pide igual; cualquier valor sirve
     FRONTEND_ORIGIN   origen exacto permitido por CORS (default http://localhost:8890)
-    FORMULARIO7_DB_PATH  ubicacion de la base SQLite (default db/formulario7.db)
+    FORMULARIO7_DB_PATH    ubicacion de la base SQLite (default db/formulario7.db)
+    FORMULARIO7_CARGAS_DIR donde se guarda una copia de cada Excel aprobado (default cargas/)
+    FUENTES_HABILITADAS    fuentes de financiamiento que se muestran y se aceptan en el Excel,
+                           separadas por coma (default 110 -- la 131 queda oculta; "110,131" la vuelve a mostrar)
+    Drive y mail: ver el docstring de integrations.py (GOOGLE_DRIVE_*, SMTP_*, MAIL_TO)
 """
+import hashlib
 import logging
 import os
 import sys
+from collections import defaultdict
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file, session
+from flask import Flask, jsonify, request
 
 import auth
 import db
-import excel_export
+import excel_import
+import integrations
 import validations
 
 ANIO_FISCAL = int(os.environ.get("ANIO_FISCAL", 2027))
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:8890")
+CARGAS_DIR = Path(os.environ.get("FORMULARIO7_CARGAS_DIR", db.RAIZ / "cargas"))
+FUENTES_HABILITADAS = tuple(
+    int(fuente) for fuente in (os.environ.get("FUENTES_HABILITADAS") or "110").split(",") if fuente.strip()
+)
+MAX_MB_EXCEL = 10
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,20 +54,24 @@ logging.basicConfig(
 log = logging.getLogger("formulario7")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY")
-if not app.secret_key:
-    app.secret_key = "dev-secret-cambiar-en-produccion"
-    log.warning("SECRET_KEY no seteada -- usando una clave de desarrollo. No usar asi en produccion.")
-# SameSite=None + Secure, no Lax: frontend (GitHub Pages) y backend (este
-# Codespace / Render / etc.) viven en dominios distintos de verdad -- no
-# son "same-site" como localhost:8890 vs localhost:5190 (ahi Lax alcanzaba
-# porque el navegador considera "sitio" al dominio, no al puerto). Con
-# dominios distintos, SameSite=Lax bloquea la cookie en el fetch entre
-# sitios: el login devolvia 200 pero la sesion se perdia en el siguiente
-# request. None requiere Secure (solo HTTPS) -- ya estamos siempre en
-# HTTPS en cualquier deploy real, y en local http://localhost el browser
-# igual permite cookies "Secure" sobre ese origen especial.
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="None", SESSION_COOKIE_SECURE=True)
+app.secret_key = os.environ.get("SECRET_KEY", "no-se-usa-la-sesion-de-flask-ver-auth.py")
+# La planilla oficial pesa ~250 KB; esto es solo un tope contra archivos que no son el Formulario 7.
+app.config["MAX_CONTENT_LENGTH"] = MAX_MB_EXCEL * 1024 * 1024
+
+
+def _preparar_base():
+    """Al arrancar: crea lo que le falte a una base hecha con una version
+    anterior de db/schema.sql (p. ej. la tabla `sesion` del login por token,
+    sin la cual el login falla) y deja habilitadas solo FUENTES_HABILITADAS."""
+    try:
+        with db.conexion() as conn:
+            db.asegurar_esquema(conn)
+            db.habilitar_fuentes(conn, FUENTES_HABILITADAS)
+    except db.DbError as exc:
+        log.warning("No se pudo preparar la base: %s", exc)
+
+
+_preparar_base()
 
 
 @app.before_request
@@ -60,14 +82,18 @@ def _preflight():
 
 @app.after_request
 def _cors(response):
-    # Origen fijo (no "*"): con Allow-Credentials=true el browser rechaza
-    # un origen comodin, y aca la cookie de sesion es necesaria en cada
-    # request autenticado.
+    # Origen fijo (no "*") como buena practica, pero ya no hace falta por
+    # cookies: la sesion viaja por header Authorization (ver auth.py), no
+    # por cookie -- no se necesita Access-Control-Allow-Credentials.
     response.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     return response
+
+
+@app.errorhandler(413)
+def _archivo_muy_grande(_exc):
+    return jsonify({"ok": False, "error": f"El archivo supera el máximo de {MAX_MB_EXCEL} MB."}), 413
 
 
 def _usuario_publico(usuario):
@@ -95,22 +121,25 @@ def login():
     try:
         with db.conexion() as conn:
             usuario = db.obtener_usuario_por_username(conn, username)
+            if (usuario is None or not usuario["activo"]
+                    or not auth.verificar_password(usuario["password_hash"], password)):
+                return jsonify({"ok": False, "error": "Usuario o contraseña incorrectos."}), 401
+
+            token = auth.generar_token()
+            db.crear_sesion(conn, usuario["id"], token)
     except db.DbError as exc:
         log.error("Error de base en login: %s", exc)
         return jsonify({"ok": False, "error": str(exc)}), 500
 
-    if (usuario is None or not usuario["activo"]
-            or not auth.verificar_password(usuario["password_hash"], password)):
-        return jsonify({"ok": False, "error": "Usuario o contraseña incorrectos."}), 401
-
-    session.clear()
-    session["usuario_id"] = usuario["id"]
-    return jsonify({"ok": True, "usuario": _usuario_publico(usuario)}), 200
+    return jsonify({"ok": True, "token": token, "usuario": _usuario_publico(usuario)}), 200
 
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
-    session.clear()
+    token = auth._token_de_la_request()
+    if token is not None:
+        with db.conexion() as conn:
+            db.borrar_sesion(conn, token)
     return jsonify({"ok": True}), 200
 
 
@@ -129,6 +158,16 @@ def secretarias(usuario):
         return jsonify({"ok": True, "secretarias": db.listar_secretarias(conn)}), 200
 
 
+@app.route("/api/fuentes", methods=["GET"])
+@auth.login_required
+def fuentes_endpoint(usuario):
+    """Las fuentes habilitadas (FUENTES_HABILITADAS): las unicas que ofrecen
+    los selectores del admin."""
+    with db.conexion() as conn:
+        fuentes = [f for f in db.listar_fuentes(conn) if f["activa"]]
+    return jsonify({"ok": True, "fuentes": fuentes}), 200
+
+
 @app.route("/api/admin/secretarias/<int:secretaria_id>", methods=["PATCH"])
 @auth.admin_required
 def actualizar_secretaria_endpoint(usuario, secretaria_id):
@@ -142,38 +181,34 @@ def actualizar_secretaria_endpoint(usuario, secretaria_id):
     return jsonify({"ok": True, "subjurisdiccion": subjurisdiccion}), 200
 
 
-@app.route("/api/catalogo", methods=["GET"])
-@auth.login_required
-def catalogo(usuario):
-    q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
-        return jsonify({"ok": True, "bienes": []}), 200
-    con_precio = request.args.get("con_precio") in ("1", "true", "True")
-    with db.conexion() as conn:
-        bienes = db.buscar_catalogo(conn, q, ANIO_FISCAL, con_precio=con_precio)
-    return jsonify({"ok": True, "bienes": bienes}), 200
-
-
 @app.route("/api/mis-categorias", methods=["GET"])
 @auth.login_required
 def mis_categorias(usuario):
+    """Lo que ve el area en su pagina: sus categorias (una fila por
+    Categoria+Fuente, con techo y lo ya cargado), el total de la Secretaria
+    por fuente y el ultimo Excel que subio de cada Categoria."""
     if usuario["rol"] == "admin":
         secretaria_id = request.args.get("secretaria_id", type=int)
         if not secretaria_id:
             return jsonify({"ok": False, "error": "secretaria_id es requerido para el admin."}), 400
     else:
         secretaria_id = usuario["secretaria_id"]
-    fuente = request.args.get("fuente", 110, type=int)
 
     with db.conexion() as conn:
-        categorias = db.listar_categorias_de_secretaria(conn, secretaria_id, fuente, ANIO_FISCAL)
-        cuota_total = db.obtener_secretaria_cuota_total(conn, secretaria_id, fuente, ANIO_FISCAL)
         fuentes = db.listar_fuentes(conn)
+        categorias = db.listar_categorias_de_secretaria(conn, secretaria_id, ANIO_FISCAL)
+        totales = [
+            total
+            for fuente in fuentes if fuente["activa"]
+            for total in db.reporte_totales_secretaria(conn, ANIO_FISCAL, fuente["id"], secretaria_id=secretaria_id)
+        ]
+        ultimas_cargas = db.ultimas_cargas_por_categoria(conn, secretaria_id, ANIO_FISCAL)
 
     return jsonify({
         "ok": True,
         "categorias": categorias,
-        "cuota_total": cuota_total,
+        "totales": totales,
+        "ultimas_cargas": ultimas_cargas,
         "fuentes": fuentes,
         "anio_fiscal": ANIO_FISCAL,
     }), 200
@@ -181,67 +216,163 @@ def mis_categorias(usuario):
 
 # ================= Formularios =================
 
-@app.route("/api/formularios", methods=["POST"])
-@auth.login_required
-def crear_formulario(usuario):
-    if usuario["rol"] != "area":
-        return jsonify({"ok": False, "error": "Solo un usuario de area puede cargar un Formulario 7."}), 403
+def _quien(usuario):
+    nombre = usuario.get("nombre_completo")
+    return f"{usuario['username']} ({nombre})" if nombre else usuario["username"]
 
-    body = request.get_json(silent=True) or {}
-    categoria = (body.get("categoria") or "").strip()
-    fuente = body.get("fuente")
-    items_body = body.get("items") or []
 
-    if not categoria:
-        return jsonify({"ok": False, "error": "Falta la categoria."}), 400
+def _guardar_copia_local(contenido, secretaria_id, nombre_destino):
+    """Copia del Excel aprobado en el servidor (FORMULARIO7_CARGAS_DIR): el
+    respaldo mientras Drive no este configurado, o si algun dia se pierde
+    el archivo de alla. Un error aca no frena la carga."""
     try:
-        fuente = int(fuente)
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "Fuente de financiamiento invalida."}), 400
+        carpeta = CARGAS_DIR / str(ANIO_FISCAL) / f"secretaria_{secretaria_id}"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        ruta = carpeta / f"{datetime.now():%Y%m%d-%H%M%S}_{nombre_destino}"
+        ruta.write_bytes(contenido)
+        return str(ruta)
+    except OSError:
+        log.exception("No se pudo guardar la copia local de %s", nombre_destino)
+        return None
+
+
+def _avisar_por_mail(carga_id, estado, *, contenido, errores=None, programa=None, totales=None, drive_link=None,
+                     **datos):
+    """Manda el aviso de la carga (aprobada o rechazada) en segundo plano:
+    el area ve el resultado en la pagina sin esperar al servidor de mail."""
+    if not integrations.mail_configurado():
+        log.info("SMTP no configurado: no se envia el aviso de la carga id=%s (%s).", carga_id, estado)
+        return
+    nombre_base = integrations.nombre_f7(datos["subjurisdiccion"], datos["categoria"])
+
+    def enviar():
+        if estado == "aprobado":
+            asunto, cuerpo = integrations.mail_aprobado(
+                programa=programa, totales=totales, drive_link=drive_link, **datos)
+            adjuntos = [(f"{nombre_base}.xlsx", contenido)]
+        else:
+            marcado = excel_import.marcar_errores(contenido, errores)
+            asunto, cuerpo = integrations.mail_rechazado(errores=errores, con_adjunto=marcado is not None, **datos)
+            adjuntos = [(f"{nombre_base}_con_errores.xlsx", marcado)] if marcado else []
+        integrations.enviar_mail(asunto, cuerpo, adjuntos)
+        with db.conexion() as conn:
+            db.marcar_mail_enviado(conn, carga_id)
+        log.info("Aviso por mail de la carga id=%s (%s) enviado a %s",
+                 carga_id, estado, ", ".join(integrations.destinatarios()))
+
+    integrations.en_segundo_plano(enviar)
+
+
+@app.route("/api/formularios/excel", methods=["POST"])
+@auth.login_required
+def cargar_excel_endpoint(usuario):
+    """El area carga el Formulario 7 de una Categoria subiendo su Excel (la
+    planilla oficial, un archivo por Categoria). Se acepta solo si pasa
+    TODAS las validaciones -- filas completas, precios, techo de la
+    Categoria y techo total de la Secretaria --: ahi se guarda en Drive, se
+    registran sus items (reemplazando la carga anterior de la Categoria) y
+    se avisa por mail. Si algo falla se rechaza entero, no se guarda nada y
+    se devuelve la lista completa de errores (que tambien sale por mail).
+    Nunca devuelve un archivo."""
+    if usuario["rol"] != "area":
+        return jsonify({"ok": False, "error": "Solo un usuario de área puede cargar un Formulario 7."}), 403
+
+    categoria = (request.form.get("categoria") or "").strip()
+    archivo = request.files.get("archivo")
+    if not categoria:
+        return jsonify({"ok": False, "error": "Elegí la categoría programática."}), 400
+    if archivo is None or not archivo.filename:
+        return jsonify({"ok": False, "error": "Seleccioná el Excel del Formulario 7."}), 400
+    nombre_archivo = Path(archivo.filename.replace("\\", "/")).name
+    if not nombre_archivo.lower().endswith(".xlsx"):
+        return jsonify({"ok": False, "error": "El archivo tiene que ser un Excel .xlsx (la planilla oficial "
+                                              "del Formulario 7)."}), 400
+    contenido = archivo.read()
+    if not contenido:
+        return jsonify({"ok": False, "error": "El archivo está vacío."}), 400
 
     secretaria_id = usuario["secretaria_id"]
+    with db.conexion() as conn:
+        cuotas = {c["fuente"]: c for c in db.listar_cuotas_de_categoria(conn, secretaria_id, categoria, ANIO_FISCAL)}
+        if not cuotas:
+            return jsonify({"ok": False, "error": "Esa categoría no tiene techo asignado para tu Secretaría."}), 400
+        fuentes_activas = {f["id"] for f in db.listar_fuentes(conn) if f["activa"]}
+        catalogo = db.listar_catalogo(conn, ANIO_FISCAL)
 
-    try:
+    lectura = excel_import.leer_formulario(
+        contenido, nombre_archivo=nombre_archivo, categoria=categoria, catalogo=catalogo,
+        fuentes_categoria=set(cuotas), fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,
+    )
+    totales_por_fuente = dict(lectura["totales_por_fuente"])
+    with db.conexion() as conn:
+        errores_techo = validations.validar_techos(
+            conn, secretaria_id=secretaria_id, categoria=categoria, anio_fiscal=ANIO_FISCAL,
+            totales_por_fuente=totales_por_fuente,
+        )
+    errores = errores_techo + lectura["errores"]
+
+    totales = [
+        {"fuente": fuente, "total": float(total), "techo_categoria": float(cuotas[fuente]["techo"])}
+        for fuente, total in sorted(totales_por_fuente.items())
+    ]
+    total_general = float(sum(totales_por_fuente.values(), Decimal(0)))
+    subjurisdiccion = usuario.get("secretaria_subjurisdiccion") or lectura["subjurisdiccion"]
+    datos_mail = {
+        "secretaria": usuario["secretaria_nombre"], "categoria": categoria, "subjurisdiccion": subjurisdiccion,
+        "nombre_archivo": nombre_archivo, "usuario": _quien(usuario),
+    }
+    registro = {
+        "secretaria_id": secretaria_id, "categoria": categoria, "anio_fiscal": ANIO_FISCAL,
+        "nombre_archivo": nombre_archivo, "sha256": hashlib.sha256(contenido).hexdigest(),
+        "total": total_general, "subido_por": usuario["id"],
+    }
+
+    if errores:
         with db.conexion() as conn:
-            fuente_row = db.obtener_fuente(conn, fuente)
-            if fuente_row is None or not fuente_row["activa"]:
-                return jsonify({"ok": False, "error": f"La fuente {fuente} todavia no esta habilitada."}), 400
+            carga_id = db.registrar_carga_excel(conn, estado="rechazado", errores=errores, **registro)
+        _avisar_por_mail(carga_id, "rechazado", contenido=contenido, errores=errores, **datos_mail)
+        log.info("Excel rechazado: secretaria=%s categoria=%s archivo=%s errores=%s (carga id=%s)",
+                 secretaria_id, categoria, nombre_archivo, len(errores), carga_id)
+        return jsonify({
+            "ok": False, "estado": "rechazado", "id": carga_id,
+            "error": f"El Excel no se cargó: tiene {len(errores)} error(es). Corregilos en el archivo y volvé a subirlo.",
+            "errores": errores, "totales": totales, "mail": integrations.mail_configurado(),
+        }), 422
 
-            existente = db.obtener_submission_por_combinacion(conn, secretaria_id, categoria, fuente, ANIO_FISCAL)
-            excluir_id = existente["id"] if existente else None
+    nombre_destino = f"{integrations.nombre_f7(subjurisdiccion, categoria)}.xlsx"
+    with db.conexion() as conn:
+        anterior = db.ultima_carga_aprobada(conn, secretaria_id, categoria, ANIO_FISCAL)
+    try:
+        drive = integrations.subir_a_drive(
+            nombre_destino, contenido, file_id_anterior=(anterior or {}).get("drive_file_id"))
+    except integrations.IntegracionError as exc:
+        log.error("Excel valido pero no se pudo guardar en Drive (secretaria=%s categoria=%s): %s",
+                  secretaria_id, categoria, exc)
+        return jsonify({"ok": False, "error": f"El Excel está bien, pero no se pudo guardar en Drive, así que "
+                                              f"no se registró la carga. Probá de nuevo en unos minutos. ({exc})"}), 502
+    drive = drive or {}
+    archivo_local = _guardar_copia_local(contenido, secretaria_id, nombre_destino)
 
-            items = validations.resolver_y_validar_items(conn, items_body, ANIO_FISCAL)
-            nuevo_total = round(sum(i["subtotal"] for i in items), 2)
+    items_por_fuente = defaultdict(list)
+    for item in lectura["items"]:
+        items_por_fuente[item["fuente"]].append(item)
+    with db.conexion() as conn:
+        db.reemplazar_formularios_de_categoria(
+            conn, secretaria_id=secretaria_id, categoria=categoria, anio_fiscal=ANIO_FISCAL,
+            items_por_fuente=items_por_fuente, fuentes_activas=fuentes_activas,
+            subjurisdiccion=subjurisdiccion, programa=lectura["programa"], submitted_by=usuario["id"],
+        )
+        carga_id = db.registrar_carga_excel(
+            conn, estado="aprobado", errores=None, drive_file_id=drive.get("id"),
+            drive_link=drive.get("webViewLink"), archivo_local=archivo_local, **registro)
+    _avisar_por_mail(carga_id, "aprobado", contenido=contenido, programa=lectura["programa"], totales=totales,
+                     drive_link=drive.get("webViewLink"), **datos_mail)
 
-            aviso_categoria = validations.validar_techos(
-                conn, secretaria_id=secretaria_id, categoria=categoria, fuente=fuente,
-                anio_fiscal=ANIO_FISCAL, nuevo_total=nuevo_total, excluir_submission_id=excluir_id,
-            )
-
-            # subjurisdiccion NO sale del body: es un dato fijo de la
-            # Secretaria (lo carga el admin), el area no lo escribe.
-            submission_id = db.guardar_formulario(
-                conn, secretaria_id=secretaria_id, categoria=categoria, fuente=fuente,
-                anio_fiscal=ANIO_FISCAL, subjurisdiccion=usuario.get("secretaria_subjurisdiccion"),
-                programa=(body.get("programa") or "").strip() or None, submitted_by=usuario["id"], items=items,
-                submission_id_existente=excluir_id,
-            )
-    except validations.ValidacionError as exc:
-        return jsonify({"ok": False, **exc.to_dict()}), 400
-    except validations.TechoExcedidoError as exc:
-        return jsonify({"ok": False, **exc.to_dict()}), 409
-    except db.DbError as exc:
-        log.error("Error de base creando formulario: %s", exc)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-    except Exception:
-        log.exception("Error inesperado creando formulario")
-        return jsonify({"ok": False, "error": "Error inesperado. Revisar la consola del servidor."}), 500
-
-    log.info("Formulario guardado: secretaria=%s categoria=%s fuente=%s total=%s (id=%s)%s",
-              secretaria_id, categoria, fuente, nuevo_total, submission_id,
-              " [supera techo sugerido de categoria]" if aviso_categoria else "")
+    log.info("Excel aprobado: secretaria=%s categoria=%s total=%s items=%s drive=%s (carga id=%s)",
+             secretaria_id, categoria, total_general, len(lectura["items"]), drive.get("id"), carga_id)
     return jsonify({
-        "ok": True, "id": submission_id, "total": nuevo_total, "aviso_categoria": aviso_categoria,
+        "ok": True, "estado": "aprobado", "id": carga_id, "total": total_general, "totales": totales,
+        "items": len(lectura["items"]), "drive": bool(drive), "mail": integrations.mail_configurado(),
     }), 201
 
 
@@ -269,39 +400,6 @@ def obtener_formulario_endpoint(usuario, submission_id):
     if usuario["rol"] != "admin" and formulario["secretaria_id"] != usuario["secretaria_id"]:
         return jsonify({"ok": False, "error": "No autorizado."}), 403
     return jsonify({"ok": True, "formulario": formulario}), 200
-
-
-@app.route("/api/formularios/<int:submission_id>/excel", methods=["GET"])
-@auth.login_required
-def exportar_excel_endpoint(usuario, submission_id):
-    """La pagina no reemplaza al Excel: esta carga se puede seguir editando
-    desde la web, pero siempre se puede volver a bajar como el mismo Excel
-    de siempre (misma plantilla, mismas formulas) -- ver excel_export.py."""
-    with db.conexion() as conn:
-        formulario = db.obtener_formulario(conn, submission_id)
-    if formulario is None:
-        return jsonify({"ok": False, "error": "No encontrado."}), 404
-    if usuario["rol"] != "admin" and formulario["secretaria_id"] != usuario["secretaria_id"]:
-        return jsonify({"ok": False, "error": "No autorizado."}), 403
-
-    try:
-        archivo = excel_export.generar_excel(
-            subjurisdiccion=formulario["subjurisdiccion"],
-            programa=formulario["programa"],
-            fuente=formulario["fuente"],
-            items=formulario["items"],
-        )
-    except excel_export.PlantillaNoEncontradaError as exc:
-        log.error("No se pudo exportar el Excel: %s", exc)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-    nombre = excel_export.nombre_archivo(
-        subjurisdiccion=formulario["subjurisdiccion"], categoria=formulario["categoria"],
-    )
-    return send_file(
-        archivo, as_attachment=True, download_name=nombre,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
 
 
 # ================= Admin =================
@@ -405,9 +503,9 @@ def actualizar_techo_categoria_endpoint(usuario, cuota_categoria_id):
     """Edicion manual del techo por categoria -- para correcciones puntuales
     sin tener que volver a subir Libro2.xlsx (que igual las pisaria en la
     proxima reimportacion, eso es esperable y se documenta en db/README.md).
-    Este techo es informativo (ver validations.validar_techos), asi que
-    editarlo no bloquea ni desbloquea nada por si solo -- ajusta el aviso
-    que se muestra, y sirve como referencia para el admin."""
+    Este techo bloquea (ver validations.validar_techos): el proximo Excel de
+    esa categoria se valida contra el valor nuevo. Las cargas ya aprobadas
+    no se revalidan."""
     body = request.get_json(silent=True) or {}
     try:
         techo = float(body.get("techo"))
@@ -495,6 +593,20 @@ def seguimiento_endpoint(usuario):
         },
         "anio_fiscal": ANIO_FISCAL,
         "fuente": fuente,
+    }), 200
+
+
+@app.route("/api/admin/cargas-excel", methods=["GET"])
+@auth.admin_required
+def cargas_excel_endpoint(usuario):
+    """Ultimos Excel subidos por las areas, aprobados y rechazados -- lo
+    mismo que llega por mail, visible aunque el SMTP no este configurado."""
+    limite = max(1, min(request.args.get("limite", 100, type=int), 500))
+    with db.conexion() as conn:
+        cargas = db.listar_cargas_excel(conn, ANIO_FISCAL, limite=limite)
+    return jsonify({
+        "ok": True, "cargas": cargas, "anio_fiscal": ANIO_FISCAL,
+        "mail_configurado": integrations.mail_configurado(), "drive_configurado": integrations.drive_configurado(),
     }), 200
 
 

@@ -10,6 +10,7 @@ programacion.
 Se puede pisar la ubicacion de la base con la variable de entorno
 FORMULARIO7_DB_PATH (usado por los tests).
 """
+import json
 import os
 import sqlite3
 import threading
@@ -18,6 +19,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 DB_PATH_DEFECTO = RAIZ / "db" / "formulario7.db"
+SCHEMA_PATH = RAIZ / "db" / "schema.sql"
 
 _lock = threading.Lock()
 
@@ -51,11 +53,26 @@ def conexion():
         conn.close()
 
 
+def asegurar_esquema(conn):
+    """Vuelve a correr db/schema.sql sobre una base ya existente: como todo
+    ahi es IF NOT EXISTS / OR IGNORE, solo crea lo que falte (por ejemplo
+    las tablas `sesion` o `f7_carga_excel` en una base creada antes de que
+    existieran) sin tocar ningun dato. Lo llama app.py al arrancar."""
+    conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
 # ================= Fuentes de financiamiento =================
 
-def obtener_fuente(conn, fuente_id):
-    fila = conn.execute("SELECT * FROM fuente_financiamiento WHERE id = ?", (fuente_id,)).fetchone()
-    return dict(fila) if fila else None
+def habilitar_fuentes(conn, fuentes):
+    """Deja activas solo estas fuentes y oculta el resto (activa=0): una
+    fuente oculta no aparece en ninguna pagina ni se acepta en el Excel,
+    pero sus techos y cargas siguen en la base por si se vuelve a habilitar.
+    La llama app.py al arrancar, con FUENTES_HABILITADAS."""
+    marcadores = ",".join("?" * len(fuentes))
+    conn.execute(
+        f"UPDATE fuente_financiamiento SET activa = CASE WHEN id IN ({marcadores}) THEN 1 ELSE 0 END",
+        tuple(fuentes),
+    )
 
 
 def listar_fuentes(conn):
@@ -131,6 +148,34 @@ def obtener_usuario_por_id(conn, usuario_id):
         WHERE u.id = ?
         """,
         (usuario_id,),
+    ).fetchone()
+    return dict(fila) if fila else None
+
+
+# ================= Sesion (token, no cookie) =================
+
+def crear_sesion(conn, usuario_id, token):
+    conn.execute("INSERT INTO sesion (token, usuario_id) VALUES (?, ?)", (token, usuario_id))
+
+
+def borrar_sesion(conn, token):
+    conn.execute("DELETE FROM sesion WHERE token = ?", (token,))
+
+
+def obtener_usuario_por_token(conn, token):
+    """Relee el usuario desde la base a partir del token -- no confia en
+    nada mas alla del id que el token resuelve, asi que desactivar a
+    alguien corta el acceso al instante aunque tenga un token todavia
+    valido (mismo criterio que tenia la sesion de cookie)."""
+    fila = conn.execute(
+        """
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
+        FROM sesion se
+        JOIN usuario u ON u.id = se.usuario_id
+        LEFT JOIN secretaria s ON s.id = u.secretaria_id
+        WHERE se.token = ?
+        """,
+        (token,),
     ).fetchone()
     return dict(fila) if fila else None
 
@@ -280,23 +325,42 @@ def obtener_secretaria_cuota_total(conn, secretaria_id, fuente, anio_fiscal):
     return dict(fila) if fila else None
 
 
-def listar_categorias_de_secretaria(conn, secretaria_id, fuente, anio_fiscal):
-    """Categorias vigentes de una Secretaria con su techo y lo ya cargado
-    (via la carga 'enviada' de esa combinacion, si existe) -- lo que
-    alimenta el picker de categoria del area."""
+def listar_categorias_de_secretaria(conn, secretaria_id, anio_fiscal):
+    """Categorias vigentes de una Secretaria, una fila por Categoria+Fuente
+    (solo fuentes habilitadas), con su techo y lo ya cargado (via la carga
+    'enviada' de esa combinacion, si existe) -- lo que alimenta el selector
+    de categoria y la tabla "Mis cargas" del area."""
     filas = conn.execute(
         """
-        SELECT cc.categoria, cc.techo,
+        SELECT cc.categoria, cc.fuente, cc.techo,
                s.id AS submission_id, s.submitted_at,
                COALESCE((SELECT SUM(i.subtotal) FROM f7_item i WHERE i.submission_id = s.id), 0) AS cargado
         FROM cuota_categoria cc
+        JOIN fuente_financiamiento ff ON ff.id = cc.fuente AND ff.activa = 1
         LEFT JOIN f7_submission s
                ON s.secretaria_id = cc.secretaria_id AND s.categoria = cc.categoria
               AND s.fuente = cc.fuente AND s.anio_fiscal = cc.anio_fiscal AND s.estado = 'enviado'
-        WHERE cc.secretaria_id = ? AND cc.fuente = ? AND cc.anio_fiscal = ? AND cc.vigente = 1
-        ORDER BY cc.categoria
+        WHERE cc.secretaria_id = ? AND cc.anio_fiscal = ? AND cc.vigente = 1
+        ORDER BY cc.categoria, cc.fuente
         """,
-        (secretaria_id, fuente, anio_fiscal),
+        (secretaria_id, anio_fiscal),
+    ).fetchall()
+    return [dict(f) for f in filas]
+
+
+def listar_cuotas_de_categoria(conn, secretaria_id, categoria, anio_fiscal):
+    """El techo vigente de UNA Categoria de la Secretaria en cada fuente
+    habilitada (una fila por fuente) -- define con que fuentes se puede
+    cargar un Excel de esa Categoria. Lista vacia = la Categoria no es de
+    esta Secretaria (o no tiene techo en ninguna fuente)."""
+    filas = conn.execute(
+        """
+        SELECT cc.* FROM cuota_categoria cc
+        JOIN fuente_financiamiento ff ON ff.id = cc.fuente AND ff.activa = 1
+        WHERE cc.secretaria_id = ? AND cc.categoria = ? AND cc.anio_fiscal = ? AND cc.vigente = 1
+        ORDER BY cc.fuente
+        """,
+        (secretaria_id, categoria, anio_fiscal),
     ).fetchall()
     return [dict(f) for f in filas]
 
@@ -327,47 +391,67 @@ def upsert_catalogo_bien(conn, *, codigo, denominacion, unidad_texto, unidad_num
     )
 
 
-def obtener_catalogo_por_id(conn, catalogo_id):
-    fila = conn.execute("SELECT * FROM catalogo_bienes WHERE id = ?", (catalogo_id,)).fetchone()
-    return dict(fila) if fila else None
-
-
-def buscar_catalogo(conn, q, anio_fiscal, con_precio=False, limite=25):
-    sql = "SELECT * FROM catalogo_bienes WHERE anio_fiscal = ? AND vigente = 1 AND denominacion LIKE ?"
-    params = [anio_fiscal, f"%{q}%"]
-    if con_precio:
-        sql += " AND precio IS NOT NULL"
-    sql += " ORDER BY denominacion LIMIT ?"
-    params.append(limite)
-    filas = conn.execute(sql, params).fetchall()
+def listar_catalogo(conn, anio_fiscal):
+    """Todo el "Listado de bienes" vigente del anio (~1500 filas), en el
+    orden del Excel original -- excel_import lo indexa en memoria una vez
+    por Excel subido en vez de hacer una consulta por fila."""
+    filas = conn.execute(
+        """
+        SELECT id, codigo, denominacion, unidad_texto, precio FROM catalogo_bienes
+        WHERE anio_fiscal = ? AND vigente = 1 ORDER BY id
+        """,
+        (anio_fiscal,),
+    ).fetchall()
     return [dict(f) for f in filas]
 
 
 # ================= Formulario 7 =================
 
-def obtener_submission_por_combinacion(conn, secretaria_id, categoria, fuente, anio_fiscal):
-    fila = conn.execute(
-        """
-        SELECT * FROM f7_submission
-        WHERE secretaria_id = ? AND categoria = ? AND fuente = ? AND anio_fiscal = ?
-        """,
-        (secretaria_id, categoria, fuente, anio_fiscal),
-    ).fetchone()
-    return dict(fila) if fila else None
-
-
-def calcular_usado_secretaria(conn, secretaria_id, fuente, anio_fiscal, excluir_submission_id=None):
+def calcular_usado_secretaria(conn, secretaria_id, fuente, anio_fiscal, excluir_categoria=None):
+    """Lo ya cargado (cargas 'enviadas') por la Secretaria en una fuente.
+    excluir_categoria deja afuera esa Categoria: es la que se esta por
+    reemplazar con un Excel nuevo, no hay que sumarla dos veces."""
     sql = """
         SELECT COALESCE(SUM(i.subtotal), 0) AS usado
         FROM f7_submission s JOIN f7_item i ON i.submission_id = s.id
         WHERE s.secretaria_id = ? AND s.fuente = ? AND s.anio_fiscal = ? AND s.estado = 'enviado'
     """
     params = [secretaria_id, fuente, anio_fiscal]
-    if excluir_submission_id is not None:
-        sql += " AND s.id != ?"
-        params.append(excluir_submission_id)
+    if excluir_categoria is not None:
+        sql += " AND s.categoria != ?"
+        params.append(excluir_categoria)
     fila = conn.execute(sql, params).fetchone()
     return fila["usado"]
+
+
+def reemplazar_formularios_de_categoria(conn, *, secretaria_id, categoria, anio_fiscal, items_por_fuente,
+                                          fuentes_activas, subjurisdiccion, programa, submitted_by):
+    """Un Excel aprobado es el Formulario 7 COMPLETO de la Categoria (el
+    archivo es uno por Categoria, con la fuente fila por fila): reemplaza
+    la carga de cada fuente que trae y anula la de las fuentes habilitadas
+    que ya no trae -- si no, un segundo Excel que saco todos los bienes de
+    una fuente dejaria viva la carga de esa fuente del Excel anterior. Las
+    cargas de una fuente oculta no se tocan: el Excel no la puede traer.
+    Devuelve {fuente: id}."""
+    existentes = {
+        fila["fuente"]: dict(fila)
+        for fila in conn.execute(
+            "SELECT * FROM f7_submission WHERE secretaria_id = ? AND categoria = ? AND anio_fiscal = ?",
+            (secretaria_id, categoria, anio_fiscal),
+        ).fetchall()
+    }
+    ids = {}
+    for fuente, items in sorted(items_por_fuente.items()):
+        existente = existentes.get(fuente)
+        ids[fuente] = guardar_formulario(
+            conn, secretaria_id=secretaria_id, categoria=categoria, fuente=fuente, anio_fiscal=anio_fiscal,
+            subjurisdiccion=subjurisdiccion, programa=programa, submitted_by=submitted_by, items=items,
+            submission_id_existente=existente["id"] if existente else None,
+        )
+    for fuente, existente in existentes.items():
+        if fuente in fuentes_activas and fuente not in items_por_fuente and existente["estado"] == "enviado":
+            anular_formulario(conn, existente["id"])
+    return ids
 
 
 def guardar_formulario(conn, *, secretaria_id, categoria, fuente, anio_fiscal,
@@ -378,10 +462,13 @@ def guardar_formulario(conn, *, secretaria_id, categoria, fuente, anio_fiscal,
     with _lock:
         if submission_id_existente is not None:
             submission_id = submission_id_existente
+            # submitted_at se renueva: es "cuando se envio esta version",
+            # lo que muestran "Mis cargas" y el panel de seguimiento.
             conn.execute(
                 """
                 UPDATE f7_submission
-                SET subjurisdiccion = ?, programa = ?, submitted_by = ?, estado = 'enviado'
+                SET subjurisdiccion = ?, programa = ?, submitted_by = ?, estado = 'enviado',
+                    submitted_at = datetime('now')
                 WHERE id = ?
                 """,
                 (subjurisdiccion, programa, submitted_by, submission_id),
@@ -490,7 +577,8 @@ def reporte_cuota(conn, anio_fiscal, fuente, secretaria_id=None):
 
 def reporte_totales_secretaria(conn, anio_fiscal, fuente, secretaria_id=None):
     sql = """
-        SELECT sct.id AS secretaria_cuota_total_id, sct.secretaria_id, sc.nombre AS secretaria, sct.monto_total,
+        SELECT sct.id AS secretaria_cuota_total_id, sct.secretaria_id, sc.nombre AS secretaria,
+               sct.fuente, sct.monto_total,
                COALESCE((
                    SELECT SUM(i.subtotal)
                    FROM f7_submission s JOIN f7_item i ON i.submission_id = s.id
@@ -508,6 +596,88 @@ def reporte_totales_secretaria(conn, anio_fiscal, fuente, secretaria_id=None):
     sql += " ORDER BY sc.nombre"
     filas = conn.execute(sql, params).fetchall()
     return [dict(f) for f in filas]
+
+
+# ================= Cargas de Excel (registro de cada intento) =================
+
+def registrar_carga_excel(conn, *, secretaria_id, categoria, anio_fiscal, nombre_archivo, sha256, estado,
+                          total, errores, subido_por, drive_file_id=None, drive_link=None, archivo_local=None):
+    cur = conn.execute(
+        """
+        INSERT INTO f7_carga_excel (
+            secretaria_id, categoria, anio_fiscal, nombre_archivo, sha256, estado, total,
+            errores, drive_file_id, drive_link, archivo_local, subido_por
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            secretaria_id, categoria, anio_fiscal, nombre_archivo, sha256, estado, total,
+            json.dumps(errores, ensure_ascii=False) if errores else None,
+            drive_file_id, drive_link, archivo_local, subido_por,
+        ),
+    )
+    return cur.lastrowid
+
+
+def marcar_mail_enviado(conn, carga_id):
+    conn.execute("UPDATE f7_carga_excel SET mail_enviado_en = datetime('now') WHERE id = ?", (carga_id,))
+
+
+def ultima_carga_aprobada(conn, secretaria_id, categoria, anio_fiscal):
+    """El ultimo Excel aprobado de la Categoria -- de ahi sale el archivo de
+    Drive a reemplazar cuando se aprueba uno nuevo (un archivo por Categoria)."""
+    fila = conn.execute(
+        """
+        SELECT * FROM f7_carga_excel
+        WHERE secretaria_id = ? AND categoria = ? AND anio_fiscal = ? AND estado = 'aprobado'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (secretaria_id, categoria, anio_fiscal),
+    ).fetchone()
+    return dict(fila) if fila else None
+
+
+def _carga_publica(fila):
+    carga = dict(fila)
+    errores = json.loads(carga.pop("errores") or "[]")
+    carga["cantidad_errores"] = len(errores)
+    return carga
+
+
+def ultimas_cargas_por_categoria(conn, secretaria_id, anio_fiscal):
+    """El ultimo Excel subido (aprobado o rechazado) de cada Categoria de la
+    Secretaria, para la columna "Ultimo Excel" de "Mis cargas"."""
+    filas = conn.execute(
+        """
+        SELECT id, categoria, nombre_archivo, estado, total, errores, subido_en
+        FROM f7_carga_excel
+        WHERE id IN (
+            SELECT MAX(id) FROM f7_carga_excel
+            WHERE secretaria_id = ? AND anio_fiscal = ?
+            GROUP BY categoria
+        )
+        """,
+        (secretaria_id, anio_fiscal),
+    ).fetchall()
+    return {fila["categoria"]: _carga_publica(fila) for fila in filas}
+
+
+def listar_cargas_excel(conn, anio_fiscal, limite=100):
+    """Ultimos Excel subidos por todas las areas (panel del admin)."""
+    filas = conn.execute(
+        """
+        SELECT c.id, c.categoria, c.nombre_archivo, c.estado, c.total, c.errores,
+               c.drive_link, c.mail_enviado_en, c.subido_en,
+               s.nombre AS secretaria, u.username AS subido_por_username
+        FROM f7_carga_excel c
+        JOIN secretaria s ON s.id = c.secretaria_id
+        JOIN usuario u ON u.id = c.subido_por
+        WHERE c.anio_fiscal = ?
+        ORDER BY c.id DESC
+        LIMIT ?
+        """,
+        (anio_fiscal, limite),
+    ).fetchall()
+    return [_carga_publica(f) for f in filas]
 
 
 # ================= Seguimiento de avance =================
