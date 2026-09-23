@@ -14,7 +14,8 @@ Por defecto escucha en http://localhost:5190
 Variables de entorno:
     PORT              puerto (default 5190)
     SECRET_KEY        no se usa para la sesion (ver auth.py), pero Flask la pide igual; cualquier valor sirve
-    FRONTEND_ORIGIN   origen exacto permitido por CORS (default http://localhost:8890)
+    FRONTEND_ORIGIN   origenes exactos permitidos por CORS, separados por coma (default http://localhost:8890;
+                      p. ej. "https://nicolasigalbornoz-alt.github.io,https://formulario7.moron-suministros.workers.dev")
     FORMULARIO7_DB_PATH    ubicacion de la base SQLite (default db/formulario7.db)
     FORMULARIO7_CARGAS_DIR donde se guarda una copia de cada Excel aprobado (default cargas/)
     FUENTES_HABILITADAS    fuentes de financiamiento que se muestran y se aceptan en el Excel,
@@ -39,7 +40,10 @@ import integrations
 import validations
 
 ANIO_FISCAL = int(os.environ.get("ANIO_FISCAL", 2027))
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:8890")
+FRONTEND_ORIGINS = tuple(
+    origen.strip().rstrip("/")
+    for origen in (os.environ.get("FRONTEND_ORIGIN") or "http://localhost:8890").split(",") if origen.strip()
+)
 CARGAS_DIR = Path(os.environ.get("FORMULARIO7_CARGAS_DIR", db.RAIZ / "cargas"))
 FUENTES_HABILITADAS = tuple(
     int(fuente) for fuente in (os.environ.get("FUENTES_HABILITADAS") or "110").split(",") if fuente.strip()
@@ -82,10 +86,14 @@ def _preflight():
 
 @app.after_request
 def _cors(response):
-    # Origen fijo (no "*") como buena practica, pero ya no hace falta por
-    # cookies: la sesion viaja por header Authorization (ver auth.py), no
-    # por cookie -- no se necesita Access-Control-Allow-Credentials.
-    response.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
+    # Solo los origenes de FRONTEND_ORIGIN (no "*"): se devuelve el que hizo
+    # el pedido si esta en la lista -- la pagina puede estar publicada en mas
+    # de un lugar (GitHub Pages, Cloudflare). La sesion viaja por header
+    # Authorization (ver auth.py), no por cookie: no hace falta
+    # Access-Control-Allow-Credentials.
+    origen = request.headers.get("Origin", "").rstrip("/")
+    response.headers["Access-Control-Allow-Origin"] = origen if origen in FRONTEND_ORIGINS else FRONTEND_ORIGINS[0]
+    response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     return response
@@ -584,7 +592,7 @@ if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 5190))
     print(f"Formulario7 backend escuchando en http://localhost:{puerto}")
     print(f"Base de datos: {db._db_path()}")
-    print(f"Origen frontend permitido (CORS): {FRONTEND_ORIGIN}")
+    print(f"Origenes frontend permitidos (CORS): {', '.join(FRONTEND_ORIGINS)}")
     # threaded=True: a diferencia de Pagv2/backend-local (uso tipicamente de
     # una sola persona a la vez), aca varias Secretarias pueden cargar al
     # mismo tiempo -- el servidor de desarrollo de Werkzeug sin threading
