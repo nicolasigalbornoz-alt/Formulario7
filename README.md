@@ -88,6 +88,45 @@ fija y lo avisa por log.
 Ver `db/README.md` para el detalle del esquema y `data/README.md` para el
 formato esperado de los Excel de origen.
 
+## Deploy
+
+**Frontend**: ya publicado en GitHub Pages (`.github/workflows/deploy-pages.yml`,
+se dispara solo con cada push a `main`) -- https://nicolasigalbornoz-alt.github.io/Formulario7/.
+Solo sirve archivos estáticos; sigue llamando a lo que diga `API_BASE` en
+`frontend/js/api.js` (hoy `http://localhost:5190`, hay que cambiarlo a la
+URL real del backend una vez desplegado, ver siguiente punto).
+
+**Backend**: todavía no está desplegado -- necesita una cuenta de hosting
+(Render, Railway, PythonAnywhere, etc.), que solo puede crear quien vaya a
+usarla, no queda automatizado acá. Pasos con Render (mismo servicio que ya
+usa Pagv2/backend-cloud):
+
+1. En [render.com](https://render.com) → New → Web Service → conectar este
+   repo de GitHub.
+2. Root Directory: (vacío/raíz). Build Command: `pip install -r requirements.txt`.
+   Start Command: `python backend/app.py`. Plan: Free (ver ⚠️ abajo).
+3. Variables de entorno: `SECRET_KEY` (Generate en el propio Render) y
+   `FRONTEND_ORIGIN=https://nicolasigalbornoz-alt.github.io`.
+4. **Antes de poder usarlo hace falta cargar los datos de referencia** --
+   `Libro2.xlsx`, `formulario 7 2027.xlsx` y `formulario7_modelo.xlsx` no
+   están en el repo (tienen cifras reales, no se commitean). Subirlos como
+   *Secret Files* de Render (Environment → Secret Files) y correr, desde el
+   Shell de Render, los mismos comandos de "Levantar todo localmente"
+   (pasos 3 a 5) apuntando `--archivo` a donde Render deja los secret
+   files (`/etc/secrets/...`).
+5. Actualizar `API_BASE` en `frontend/js/api.js` con la URL que dé Render
+   (`https://<lo-que-sea>.onrender.com`), commitear y pushear -- eso
+   dispara de nuevo el deploy de Pages con la URL correcta.
+
+⚠️ **El plan Free de Render no tiene disco persistente**: cada redeploy (o
+cada vez que el servicio se "duerme" por inactividad y despierta de nuevo)
+borra `db/formulario7.db` -- se pierden los Formularios 7 ya cargados, no
+solo los datos de referencia. Para uso real (no solo para probar) hace
+falta el plan Starter con disco persistente (~USD 7/mes) o mover a una
+base externa (Postgres). Mientras tanto, `scripts/exportar_todos_los_excel.py`
++ la carpeta de Drive (ver `data/README.md`, "Excels a Drive") sirven como
+respaldo de lo ya enviado, aunque la base en sí se resetee.
+
 ## Pendiente (fuera de alcance de esta primera versión)
 
 - Ítems "especiales" (bienes fuera del catálogo o sin precio asignado) --
@@ -98,7 +137,4 @@ formato esperado de los Excel de origen.
 - Que un usuario de área pueda cambiar su propia contraseña (hoy solo el
   admin la resetea).
 - Selector de año fiscal (hoy `ANIO_FISCAL` es una constante en `backend/app.py`, 2027).
-- Deploy real (hoy es todo local; para llevarlo a algo como Render hace
-  falta un `Procfile`/similar y mover `SECRET_KEY`/`FRONTEND_ORIGIN` a
-  variables de entorno del servicio -- ya están leídas así, falta el
-  hosting en sí).
+- Persistencia real en el deploy del backend (ver "Deploy" arriba).
