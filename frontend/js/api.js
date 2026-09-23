@@ -67,12 +67,15 @@ const Api = {
   listarFormularios: (secretariaId) =>
     apiFetch(`/api/formularios${qs({ secretaria_id: secretariaId })}`),
   obtenerFormulario: (id) => apiFetch(`/api/formularios/${id}`),
+  excelUrl: (id) => `${API_BASE}/api/formularios/${id}/excel`,
 
   crearUsuario: (body) =>
     apiFetch("/api/admin/usuarios", { method: "POST", body: JSON.stringify(body) }),
   listarUsuarios: () => apiFetch("/api/admin/usuarios"),
   actualizarUsuario: (id, body) =>
     apiFetch(`/api/admin/usuarios/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  actualizarSecretaria: (id, subjurisdiccion) =>
+    apiFetch(`/api/admin/secretarias/${id}`, { method: "PATCH", body: JSON.stringify({ subjurisdiccion }) }),
 
   anularFormulario: (id) =>
     apiFetch(`/api/admin/formularios/${id}/anular`, { method: "PATCH" }),

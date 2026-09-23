@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Formulario 7 -- Reporte de cuota</title>
+<title>Formulario 7 -- Reporte de techo presupuestario</title>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -11,6 +11,16 @@
 <div class="topbar" id="topbar"></div>
 
 <main>
+  <div class="card">
+    <h2>Secretarías</h2>
+    <p class="card-desc">Subjurisdicción de cada Secretaría (código RAFAM fijo) -- el área la ve de solo lectura en su formulario, acá es donde se carga. Hacé clic para editarla.</p>
+    <div id="alerta-secretarias"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th>Subjurisdicción</th></tr></thead>
+      <tbody id="tbody-secretarias"></tbody>
+    </table>
+  </div>
+
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div>
@@ -24,7 +34,7 @@
     </div>
     <div id="alerta-totales"></div>
     <table>
-      <thead><tr><th>Secretaría</th><th class="num">Cuota total</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>
+      <thead><tr><th>Secretaría</th><th class="num">Techo presupuestario</th><th class="num">Cargado</th><th class="num">Disponible</th></tr></thead>
       <tbody id="tbody-totales"></tbody>
     </table>
   </div>
@@ -42,7 +52,7 @@
     </div>
     <div id="alerta-categorias"></div>
     <table>
-      <thead><tr><th>Secretaría</th><th>Categoría</th><th class="num">Techo</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>
+      <thead><tr><th>Secretaría</th><th>Categoría</th><th class="num">Techo presupuestario</th><th class="num">Cargado</th><th class="num">Disponible</th></tr></thead>
       <tbody id="tbody-categorias"></tbody>
     </table>
   </div>

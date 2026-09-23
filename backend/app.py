@@ -18,10 +18,11 @@ import logging
 import os
 import sys
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, send_file, session
 
 import auth
 import db
+import excel_export
 import validations
 
 ANIO_FISCAL = int(os.environ.get("ANIO_FISCAL", 2027))
@@ -67,6 +68,7 @@ def _usuario_publico(usuario):
         "rol": usuario["rol"],
         "secretaria_id": usuario["secretaria_id"],
         "secretaria_nombre": usuario["secretaria_nombre"],
+        "secretaria_subjurisdiccion": usuario.get("secretaria_subjurisdiccion"),
         "nombre_completo": usuario["nombre_completo"],
     }
 
@@ -116,6 +118,19 @@ def sesion(usuario):
 def secretarias(usuario):
     with db.conexion() as conn:
         return jsonify({"ok": True, "secretarias": db.listar_secretarias(conn)}), 200
+
+
+@app.route("/api/admin/secretarias/<int:secretaria_id>", methods=["PATCH"])
+@auth.admin_required
+def actualizar_secretaria_endpoint(usuario, secretaria_id):
+    """Carga la Subjurisdiccion (codigo RAFAM fijo) de una Secretaria --
+    el area nunca la escribe a mano, la ve de solo lectura en el formulario."""
+    body = request.get_json(silent=True) or {}
+    subjurisdiccion = (body.get("subjurisdiccion") or "").strip() or None
+    with db.conexion() as conn:
+        db.actualizar_subjurisdiccion_secretaria(conn, secretaria_id, subjurisdiccion)
+    log.info("Subjurisdiccion de secretaria_id=%s actualizada por admin=%s", secretaria_id, usuario["username"])
+    return jsonify({"ok": True, "subjurisdiccion": subjurisdiccion}), 200
 
 
 @app.route("/api/catalogo", methods=["GET"])
@@ -194,10 +209,12 @@ def crear_formulario(usuario):
                 anio_fiscal=ANIO_FISCAL, nuevo_total=nuevo_total, excluir_submission_id=excluir_id,
             )
 
+            # subjurisdiccion NO sale del body: es un dato fijo de la
+            # Secretaria (lo carga el admin), el area no lo escribe.
             submission_id = db.guardar_formulario(
                 conn, secretaria_id=secretaria_id, categoria=categoria, fuente=fuente,
-                anio_fiscal=ANIO_FISCAL, subjurisdiccion=body.get("subjurisdiccion"),
-                programa=body.get("programa"), submitted_by=usuario["id"], items=items,
+                anio_fiscal=ANIO_FISCAL, subjurisdiccion=usuario.get("secretaria_subjurisdiccion"),
+                programa=(body.get("programa") or "").strip() or None, submitted_by=usuario["id"], items=items,
                 submission_id_existente=excluir_id,
             )
     except validations.ValidacionError as exc:
@@ -226,9 +243,10 @@ def listar_formularios_endpoint(usuario):
         secretaria_id = request.args.get("secretaria_id", type=int)
     else:
         secretaria_id = usuario["secretaria_id"]
+    fuente = request.args.get("fuente", 110, type=int)
 
     with db.conexion() as conn:
-        formularios = db.listar_formularios(conn, secretaria_id=secretaria_id, fuente=110, anio_fiscal=ANIO_FISCAL)
+        formularios = db.listar_formularios(conn, secretaria_id=secretaria_id, fuente=fuente, anio_fiscal=ANIO_FISCAL)
     return jsonify({"ok": True, "formularios": formularios}), 200
 
 
@@ -242,6 +260,39 @@ def obtener_formulario_endpoint(usuario, submission_id):
     if usuario["rol"] != "admin" and formulario["secretaria_id"] != usuario["secretaria_id"]:
         return jsonify({"ok": False, "error": "No autorizado."}), 403
     return jsonify({"ok": True, "formulario": formulario}), 200
+
+
+@app.route("/api/formularios/<int:submission_id>/excel", methods=["GET"])
+@auth.login_required
+def exportar_excel_endpoint(usuario, submission_id):
+    """La pagina no reemplaza al Excel: esta carga se puede seguir editando
+    desde la web, pero siempre se puede volver a bajar como el mismo Excel
+    de siempre (misma plantilla, mismas formulas) -- ver excel_export.py."""
+    with db.conexion() as conn:
+        formulario = db.obtener_formulario(conn, submission_id)
+    if formulario is None:
+        return jsonify({"ok": False, "error": "No encontrado."}), 404
+    if usuario["rol"] != "admin" and formulario["secretaria_id"] != usuario["secretaria_id"]:
+        return jsonify({"ok": False, "error": "No autorizado."}), 403
+
+    try:
+        archivo = excel_export.generar_excel(
+            subjurisdiccion=formulario["subjurisdiccion"],
+            programa=formulario["programa"],
+            fuente=formulario["fuente"],
+            items=formulario["items"],
+        )
+    except excel_export.PlantillaNoEncontradaError as exc:
+        log.error("No se pudo exportar el Excel: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    nombre = excel_export.nombre_archivo(
+        subjurisdiccion=formulario["subjurisdiccion"], categoria=formulario["categoria"],
+    )
+    return send_file(
+        archivo, as_attachment=True, download_name=nombre,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 # ================= Admin =================
@@ -326,11 +377,11 @@ def reporte_endpoint(usuario):
         import io
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["Secretaria", "Categoria", "Fuente", "Techo", "Usado", "Disponible"])
+        writer.writerow(["Secretaria", "Categoria", "Fuente", "Techo presupuestario", "Cargado", "Disponible"])
         for fila in categorias:
-            writer.writerow([fila["secretaria"], fila["categoria"], fuente, fila["techo"], fila["usado"], fila["disponible"]])
+            writer.writerow([fila["secretaria"], fila["categoria"], fuente, fila["techo"], fila["cargado"], fila["disponible"]])
         respuesta = app.response_class(buf.getvalue(), mimetype="text/csv")
-        respuesta.headers["Content-Disposition"] = f"attachment; filename=reporte_cuota_{fuente}_{ANIO_FISCAL}.csv"
+        respuesta.headers["Content-Disposition"] = f"attachment; filename=reporte_techo_presupuestario_{fuente}_{ANIO_FISCAL}.csv"
         return respuesta
 
     return jsonify({

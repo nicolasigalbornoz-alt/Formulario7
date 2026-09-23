@@ -14,7 +14,9 @@ Después importar los datos de referencia (`scripts/build_cuota_data.py` y
 ## Tablas
 
 - `secretaria`: las 14 Secretarías, resueltas por nombre desde
-  `Libro2.xlsx` al importar la cuota.
+  `Libro2.xlsx` al importar la cuota. `subjurisdiccion` (código RAFAM de
+  10 dígitos) la carga el admin a mano (`PATCH /api/admin/secretarias/<id>`,
+  panel "Reporte de techo presupuestario") -- el Excel de origen no la trae.
 - `fuente_financiamiento`: catálogo fijo. Se activa sola (`activa=1`) al
   correr `build_cuota_data.py`, si esa fuente tiene datos en el Excel.
 - `usuario`: login real. `rol` `area` (atado a una `secretaria_id`) o
@@ -29,8 +31,9 @@ Después importar los datos de referencia (`scripts/build_cuota_data.py` y
   que de verdad bloquea el envío es `secretaria_cuota_total.monto_total`
   -- ver `backend/validations.py`.
 - `catalogo_bienes`: el "Listado de bienes" del Excel del formulario.
-  `precio IS NULL` es un bien real (sirve para autocompletar código/unidad
-  al cargarlo como "especial"), simplemente no tiene precio de catálogo.
+  `precio IS NULL` es un bien real que existe en el catálogo pero no tiene
+  precio asignado -- no se puede cargar (ver `backend/validations.py`; en
+  esta versión no hay carga manual de bienes/precios fuera del catálogo).
 - `f7_submission` / `f7_item`: una carga de Formulario 7 (única por
   Secretaría+Categoría+Fuente+año, por el `UNIQUE`) y sus ítems. `f7_item`
   guarda una foto de denominación/unidad/precio al momento de guardar, no
@@ -47,8 +50,8 @@ así en todos lados donde hace falta (`backend/db.py`), nunca se guarda.
 ## Editar un techo a mano vs. reimportar el Excel
 
 `PATCH /api/admin/cuota-categoria/<id>` y `.../cuota-total/<id>` (el panel
-"Reporte de cuota" del admin) actualizan `techo`/`monto_total` directo en la
-base, para correcciones puntuales. Esos valores **no vuelven** a
+"Reporte de techo presupuestario" del admin) actualizan `techo`/`monto_total`
+directo en la base, para correcciones puntuales. Esos valores **no vuelven** a
 `Libro2.xlsx`: si alguien corre `build_cuota_data.py` de nuevo, pisa
 cualquier edición manual con lo que diga el Excel en ese momento. Una
 corrección que tiene que durar hay que hacerla en el Excel también, no solo

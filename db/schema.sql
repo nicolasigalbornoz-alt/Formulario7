@@ -6,10 +6,12 @@ PRAGMA foreign_keys = ON;
 -- ================= Catalogos / dimensiones =================
 
 CREATE TABLE secretaria (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre      TEXT NOT NULL UNIQUE,      -- "Salud", "Jefatura de Gabinete", etc. (viene de Libro1.xlsx)
-    jur         TEXT,                       -- codigo "Jur." de 2 digitos (ej. "04") -- referencia, no se usa para validar
-    creado_en   TEXT NOT NULL DEFAULT (datetime('now'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre          TEXT NOT NULL UNIQUE,   -- "Salud", "Jefatura de Gabinete", etc. (viene de Libro2.xlsx)
+    jur             TEXT,                    -- codigo "Jur." de 2 digitos (ej. "04") -- referencia, no se usa para validar
+    subjurisdiccion TEXT,                    -- codigo RAFAM de 10 digitos (ej. "1110111000") -- fijo por Secretaria,
+                                              -- lo carga el admin, el area no lo puede escribir (ver backend/app.py)
+    creado_en       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE fuente_financiamiento (

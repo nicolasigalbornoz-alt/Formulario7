@@ -66,13 +66,13 @@ def listar_fuentes(conn):
 # ================= Secretarias =================
 
 def listar_secretarias(conn):
-    filas = conn.execute("SELECT id, nombre, jur FROM secretaria ORDER BY nombre").fetchall()
+    filas = conn.execute("SELECT id, nombre, jur, subjurisdiccion FROM secretaria ORDER BY nombre").fetchall()
     return [dict(f) for f in filas]
 
 
 def resolver_secretaria(conn, nombre, jur=None):
     """Devuelve el id de la Secretaria, creandola si todavia no existe.
-    Usado por scripts/build_cuota_data.py -- Libro1.xlsx es la fuente de
+    Usado por scripts/build_cuota_data.py -- Libro2.xlsx es la fuente de
     verdad de que Secretarias existen."""
     fila = conn.execute("SELECT id FROM secretaria WHERE nombre = ?", (nombre,)).fetchone()
     if fila:
@@ -81,6 +81,12 @@ def resolver_secretaria(conn, nombre, jur=None):
         return fila["id"]
     cur = conn.execute("INSERT INTO secretaria (nombre, jur) VALUES (?, ?)", (nombre, jur))
     return cur.lastrowid
+
+
+def actualizar_subjurisdiccion_secretaria(conn, secretaria_id, subjurisdiccion):
+    """Solo el admin la carga (PATCH /api/admin/secretarias/<id>) -- es un
+    codigo RAFAM fijo por Secretaria, el area nunca lo escribe a mano."""
+    conn.execute("UPDATE secretaria SET subjurisdiccion = ? WHERE id = ?", (subjurisdiccion, secretaria_id))
 
 
 # ================= Usuarios =================
@@ -108,7 +114,7 @@ def crear_usuario(conn, *, username, password_hash, rol, secretaria_id=None, nom
 def obtener_usuario_por_username(conn, username):
     fila = conn.execute(
         """
-        SELECT u.*, s.nombre AS secretaria_nombre
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
         FROM usuario u LEFT JOIN secretaria s ON s.id = u.secretaria_id
         WHERE u.username = ?
         """,
@@ -120,7 +126,7 @@ def obtener_usuario_por_username(conn, username):
 def obtener_usuario_por_id(conn, usuario_id):
     fila = conn.execute(
         """
-        SELECT u.*, s.nombre AS secretaria_nombre
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
         FROM usuario u LEFT JOIN secretaria s ON s.id = u.secretaria_id
         WHERE u.id = ?
         """,
@@ -275,14 +281,14 @@ def obtener_secretaria_cuota_total(conn, secretaria_id, fuente, anio_fiscal):
 
 
 def listar_categorias_de_secretaria(conn, secretaria_id, fuente, anio_fiscal):
-    """Categorias vigentes de una Secretaria con su techo y lo ya usado (via
-    la carga 'enviada' de esa combinacion, si existe) -- lo que alimenta el
-    picker de categoria del area."""
+    """Categorias vigentes de una Secretaria con su techo y lo ya cargado
+    (via la carga 'enviada' de esa combinacion, si existe) -- lo que
+    alimenta el picker de categoria del area."""
     filas = conn.execute(
         """
         SELECT cc.categoria, cc.techo,
                s.id AS submission_id, s.submitted_at,
-               COALESCE((SELECT SUM(i.subtotal) FROM f7_item i WHERE i.submission_id = s.id), 0) AS usado
+               COALESCE((SELECT SUM(i.subtotal) FROM f7_item i WHERE i.submission_id = s.id), 0) AS cargado
         FROM cuota_categoria cc
         LEFT JOIN f7_submission s
                ON s.secretaria_id = cc.secretaria_id AND s.categoria = cc.categoria
@@ -461,7 +467,7 @@ def reporte_cuota(conn, anio_fiscal, fuente, secretaria_id=None):
     sql = """
         SELECT cc.id AS cuota_categoria_id, sc.id AS secretaria_id, sc.nombre AS secretaria,
                cc.categoria, cc.techo,
-               COALESCE(u.usado, 0) AS usado, cc.techo - COALESCE(u.usado, 0) AS disponible
+               COALESCE(u.usado, 0) AS cargado, cc.techo - COALESCE(u.usado, 0) AS disponible
         FROM cuota_categoria cc
         JOIN secretaria sc ON sc.id = cc.secretaria_id
         LEFT JOIN (
@@ -490,7 +496,7 @@ def reporte_totales_secretaria(conn, anio_fiscal, fuente, secretaria_id=None):
                    FROM f7_submission s JOIN f7_item i ON i.submission_id = s.id
                    WHERE s.secretaria_id = sct.secretaria_id AND s.fuente = sct.fuente
                      AND s.anio_fiscal = sct.anio_fiscal AND s.estado = 'enviado'
-               ), 0) AS usado
+               ), 0) AS cargado
         FROM secretaria_cuota_total sct
         JOIN secretaria sc ON sc.id = sct.secretaria_id
         WHERE sct.anio_fiscal = ? AND sct.fuente = ? AND sct.vigente = 1

@@ -27,7 +27,22 @@ El Excel que hoy completa cada área a mano. Solo se usa la hoja
 **"Listado de bienes"**: `Denominación` | `Código` | `Unidad de medida` |
 `Unidad de medida N°` | ... | `Precios 2026` (columna G, el precio que se
 usa como estimación 2027). Las hojas `Instructivo`, `Carga`, `F7 común` y
-`F7 especial` son el formulario en sí -- la web las reemplaza, no se leen.
+`F7 especial` son el formulario en sí, no se leen para importar datos --
+pero ver el punto siguiente, la web sí usa esa misma estructura para
+generar el Excel que se descarga.
+
+## `formulario7_modelo.xlsx`
+
+Copia de `formulario 7 2027.xlsx` (mismas hojas y fórmulas) que usa
+`backend/excel_export.py` como plantilla: cuando un área descarga el Excel
+de una carga ya enviada, el backend abre una copia de este archivo y
+escribe ahí Fuente/Denominación/Cantidad en la hoja "F7 común" (filas 11
+en adelante) -- Código/Unidad/Precio/Total los resuelve la propia fórmula
+`VLOOKUP` de la plantilla contra "Listado de bienes", igual que si alguien
+lo completara a mano. La web no reemplaza este Excel: lo sigue generando,
+solo que ahora la carga de datos es por la página en vez de tipeando en la
+planilla. La hoja "F7 especial" queda siempre vacía (ya no se cargan
+ítems especiales en esta versión).
 
 ## Actualizar
 

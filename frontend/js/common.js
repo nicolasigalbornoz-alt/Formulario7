@@ -46,7 +46,7 @@ async function requerirSesion(rolesPermitidos) {
 
 const NAV_ADMIN = [
   { href: "admin-seguimiento.html", texto: "Seguimiento" },
-  { href: "admin-reporte.html", texto: "Reporte de cuota" },
+  { href: "admin-reporte.html", texto: "Reporte de techo presupuestario" },
   { href: "admin-usuarios.html", texto: "Usuarios" },
 ];
 

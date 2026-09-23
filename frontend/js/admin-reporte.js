@@ -3,8 +3,10 @@
   if (!usuario) return;
   montarHeader(usuario, "admin-reporte.html");
 
+  const alertaSecretarias = document.getElementById("alerta-secretarias");
   const alertaTotales = document.getElementById("alerta-totales");
   const alertaCategorias = document.getElementById("alerta-categorias");
+  const tbodySecretarias = document.getElementById("tbody-secretarias");
   const tbodyTotales = document.getElementById("tbody-totales");
   const tbodyCategorias = document.getElementById("tbody-categorias");
   const selSecretaria = document.getElementById("sel-secretaria");
@@ -14,9 +16,17 @@
   let secretariaFiltro = "";
 
   async function cargarSecretarias() {
+    limpiarAlerta(alertaSecretarias);
     const { secretarias } = await Api.secretarias();
     selSecretaria.innerHTML = `<option value="">Todas las Secretarías</option>` +
       secretarias.map(s => `<option value="${s.id}">${escapeHtml(s.nombre)}</option>`).join("");
+
+    tbodySecretarias.innerHTML = secretarias.map(s => `
+      <tr>
+        <td>${escapeHtml(s.nombre)}</td>
+        <td class="editable" data-tipo="subjurisdiccion" data-id="${s.id}">${escapeHtml(s.subjurisdiccion || "(sin definir)")}</td>
+      </tr>
+    `).join("");
   }
 
   async function cargarReporte() {
@@ -29,8 +39,8 @@
       <tr>
         <td>${escapeHtml(t.secretaria)}</td>
         <td class="num editable" data-tipo="total" data-id="${t.secretaria_cuota_total_id}">${formatoPesos(t.monto_total)}</td>
-        <td class="num">${formatoPesos(t.usado)}</td>
-        <td class="num">${formatoPesos(t.monto_total - t.usado)}</td>
+        <td class="num">${formatoPesos(t.cargado)}</td>
+        <td class="num">${formatoPesos(t.monto_total - t.cargado)}</td>
       </tr>
     `).join("");
 
@@ -41,7 +51,7 @@
         <td>${escapeHtml(c.secretaria)}</td>
         <td>${c.categoria}</td>
         <td class="num editable" data-tipo="categoria" data-id="${c.cuota_categoria_id}">${formatoPesos(c.techo)}</td>
-        <td class="num">${formatoPesos(c.usado)}</td>
+        <td class="num">${formatoPesos(c.cargado)}</td>
         <td class="num">${formatoPesos(c.disponible)}</td>
       </tr>
     `).join("");
@@ -51,34 +61,47 @@
 
   function empezarEdicion(celda) {
     if (celda.querySelector("input")) return;
-    const valorActual = celda.dataset.tipo === "total" || celda.dataset.tipo === "categoria"
-      ? celda.textContent.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
-      : "";
+    const esTexto = celda.dataset.tipo === "subjurisdiccion";
     const original = celda.textContent;
-    celda.innerHTML = `<input type="number" step="0.01" min="0" style="text-align:right;">`;
+    const valorActual = esTexto
+      ? (original === "(sin definir)" ? "" : original)
+      : original.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+
+    celda.innerHTML = esTexto
+      ? `<input type="text" placeholder="Ej. 1110111000">`
+      : `<input type="number" step="0.01" min="0" style="text-align:right;">`;
     const input = celda.querySelector("input");
     input.value = valorActual;
     input.focus();
     input.select();
 
+    const alertaDestino = celda.dataset.tipo === "categoria" ? alertaCategorias
+      : celda.dataset.tipo === "subjurisdiccion" ? alertaSecretarias
+      : alertaTotales;
+
     let resuelto = false;
     const guardar = async () => {
       if (resuelto) return;
       resuelto = true;
-      const nuevoValor = Number(input.value);
-      if (!Number.isFinite(nuevoValor) || nuevoValor < 0) {
-        celda.textContent = original;
-        return;
-      }
       try {
-        if (celda.dataset.tipo === "categoria") {
-          await Api.actualizarTechoCategoria(celda.dataset.id, nuevoValor);
+        if (esTexto) {
+          await Api.actualizarSecretaria(celda.dataset.id, input.value.trim() || null);
+          await cargarSecretarias();
         } else {
-          await Api.actualizarMontoTotal(celda.dataset.id, nuevoValor);
+          const nuevoValor = Number(input.value);
+          if (!Number.isFinite(nuevoValor) || nuevoValor < 0) {
+            celda.textContent = original;
+            return;
+          }
+          if (celda.dataset.tipo === "categoria") {
+            await Api.actualizarTechoCategoria(celda.dataset.id, nuevoValor);
+          } else {
+            await Api.actualizarMontoTotal(celda.dataset.id, nuevoValor);
+          }
+          await cargarReporte();
         }
-        await cargarReporte();
       } catch (err) {
-        mostrarAlerta(celda.dataset.tipo === "categoria" ? alertaCategorias : alertaTotales, err.message);
+        mostrarAlerta(alertaDestino, err.message);
         celda.textContent = original;
       }
     };

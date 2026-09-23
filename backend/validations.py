@@ -43,7 +43,7 @@ class TechoExcedidoError(Exception):
         }
 
 
-CAMPOS_ITEM = ("denominacion", "unidad_medida", "cantidad", "precio_unitario")
+CAMPOS_ITEM = ("catalogo_id", "cantidad")
 
 
 def _vacio(v):
@@ -52,24 +52,24 @@ def _vacio(v):
 
 def resolver_y_validar_items(conn, items_body, anio_fiscal):
     """Recorre las filas que mando el cliente, descarta las totalmente
-    vacias, valida que las que tienen algun dato tengan todos los campos
-    requeridos, y para las de tipo 'comun' vuelve a resolver denominacion/
-    codigo/unidad/precio contra catalogo_bienes (ignora lo que haya mandado
-    el cliente en esos campos). Levanta ValidacionError en la primera fila
-    invalida -- se corrige una por vez, igual que completar un Excel."""
+    vacias, y para cada una vuelve a resolver denominacion/codigo/unidad/
+    precio contra catalogo_bienes (ignora cualquier otro dato que haya
+    mandado el cliente para esos campos -- el catalogo es la unica fuente
+    de verdad). Solo existen items "comunes": no hay carga manual de
+    bienes/precios fuera del catalogo en esta version. Levanta
+    ValidacionError en la primera fila invalida -- se corrige una por vez,
+    igual que completar un Excel."""
     resueltos = []
     for idx, raw in enumerate(items_body):
-        tipo = raw.get("tipo")
         catalogo_id = raw.get("catalogo_id")
+        cantidad = raw.get("cantidad")
 
-        fila_vacia = tipo is None and catalogo_id is None and all(_vacio(raw.get(c)) for c in CAMPOS_ITEM)
+        fila_vacia = _vacio(catalogo_id) and _vacio(cantidad)
         if fila_vacia:
             continue
 
-        if tipo not in ("comun", "especial"):
-            raise ValidacionError("Tipo de item invalido (debe ser 'comun' o 'especial').", fila=idx, campo="tipo")
-
-        cantidad = raw.get("cantidad")
+        if _vacio(catalogo_id):
+            raise ValidacionError("Falta elegir el bien de la lista.", fila=idx, campo="catalogo_id")
         if _vacio(cantidad):
             raise ValidacionError("Falta la cantidad.", fila=idx, campo="cantidad")
         try:
@@ -79,48 +79,24 @@ def resolver_y_validar_items(conn, items_body, anio_fiscal):
         if cantidad <= 0:
             raise ValidacionError("La cantidad debe ser mayor a cero.", fila=idx, campo="cantidad")
 
-        if tipo == "comun":
-            if _vacio(catalogo_id):
-                raise ValidacionError("Falta elegir el bien de la lista.", fila=idx, campo="catalogo_id")
-            bien = db.obtener_catalogo_por_id(conn, catalogo_id)
-            if bien is None:
-                raise ValidacionError("El bien elegido no existe en el catalogo.", fila=idx, campo="catalogo_id")
-            if bien["precio"] is None:
-                raise ValidacionError(
-                    f"'{bien['denominacion']}' no tiene precio de catalogo -- cargarlo como especial.",
-                    fila=idx, campo="catalogo_id",
-                )
-            denominacion = bien["denominacion"]
-            codigo = bien["codigo"]
-            unidad_medida = bien["unidad_texto"]
-            precio_unitario = float(bien["precio"])
-        else:
-            faltantes = [c for c in ("denominacion", "unidad_medida", "precio_unitario") if _vacio(raw.get(c))]
-            if faltantes:
-                raise ValidacionError(f"Faltan campos: {', '.join(faltantes)}.", fila=idx, campo=faltantes[0])
-            denominacion = raw["denominacion"]
-            unidad_medida = raw["unidad_medida"]
-            try:
-                precio_unitario = float(raw["precio_unitario"])
-            except (TypeError, ValueError):
-                raise ValidacionError("El precio debe ser un numero.", fila=idx, campo="precio_unitario")
-            if precio_unitario < 0:
-                raise ValidacionError("El precio no puede ser negativo.", fila=idx, campo="precio_unitario")
-            codigo = None
-            if not _vacio(catalogo_id):
-                bien = db.obtener_catalogo_por_id(conn, catalogo_id)
-                if bien is not None:
-                    codigo = bien["codigo"]
+        bien = db.obtener_catalogo_por_id(conn, catalogo_id)
+        if bien is None:
+            raise ValidacionError("El bien elegido no existe en el catalogo.", fila=idx, campo="catalogo_id")
+        if bien["precio"] is None:
+            raise ValidacionError(
+                f"'{bien['denominacion']}' no tiene precio de catalogo asignado.",
+                fila=idx, campo="catalogo_id",
+            )
 
         resueltos.append({
-            "tipo": tipo,
-            "catalogo_id": catalogo_id if not _vacio(catalogo_id) else None,
-            "codigo": codigo,
-            "denominacion": denominacion,
-            "unidad_medida": unidad_medida,
+            "tipo": "comun",
+            "catalogo_id": catalogo_id,
+            "codigo": bien["codigo"],
+            "denominacion": bien["denominacion"],
+            "unidad_medida": bien["unidad_texto"],
             "cantidad": cantidad,
-            "precio_unitario": precio_unitario,
-            "subtotal": round(cantidad * precio_unitario, 2),
+            "precio_unitario": float(bien["precio"]),
+            "subtotal": round(cantidad * float(bien["precio"]), 2),
         })
 
     if not resueltos:

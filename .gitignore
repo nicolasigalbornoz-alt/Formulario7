@@ -13,3 +13,4 @@ db/*.db-journal
 # Locales / editor
 .DS_Store
 *.log
+.claude/scheduled_tasks.lock
