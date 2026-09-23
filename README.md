@@ -5,18 +5,21 @@ Contrataciones de Servicios) para las Secretarías de la Municipalidad de
 Morón: cada área **sube el Excel oficial** del Formulario 7 de cada
 categoría programática y el sistema lo revisa entero antes de aceptarlo.
 
-- Solo se carga si el Excel está **bien completo**: toda fila con datos
-  tiene todas sus columnas, los bienes de "F7 común" usan el precio de
-  Presupuesto (el del Listado de bienes oficial) y los de "F7 especial"
-  traen el precio que pone el área.
+- Solo se carga si el Excel cumple lo que pide el instructivo de la propia
+  planilla: denominaciones copiadas del Listado de bienes, **todas las
+  celdas pintadas completas** (cada fila con datos, y en "F7 común" la
+  Subjurisdicción, la Fecha y el Programa), cantidades enteras y el archivo
+  nombrado `F7_Subjurisdicción_Categoría.xlsx`. Los bienes de "F7 común"
+  usan el precio de Presupuesto y los de "F7 especial" el que pone el área.
 - No puede pasarse del **techo presupuestario de la categoría ni del total
   de la Secretaría** (por fuente de financiamiento).
-- **Aprobado**: se guarda en una carpeta de Google Drive (un archivo por
-  categoría, `F7_Subjurisdicción_Categoría.xlsx`), se registran sus ítems y
-  se avisa por mail a Presupuesto con el Excel adjunto.
+- **Aprobado**: se guarda en la carpeta de Google Drive de Presupuesto (un
+  archivo por categoría, con ese nombre) y se registran sus ítems.
 - **Rechazado**: no se carga nada. El área ve en la página cada error con
-  su hoja y celda, y el mismo detalle va por mail, con una copia del Excel
-  con cada celda con error marcada y comentada.
+  su hoja y celda para corregirlo y volver a subirlo.
+- No se manda ningún mail. Las direcciones de Presupuesto
+  (dir.presupuesto@moron.gob.ar, bessega.tadeo@moron.gob.ar) figuran en la
+  página para que las áreas escriban con dudas sobre el techo o la carga.
 
 La página no genera ni devuelve ningún archivo.
 
@@ -26,7 +29,7 @@ La página no genera ni devuelve ningún archivo.
   proceso, sin build step. Auth real (usuario/contraseña con hash, sesión
   por token), no la clave compartida que usa el sitio hermano Pagv2.
   `excel_import.py` lee y valida el Excel, `validations.py` los techos,
-  `integrations.py` Drive y mail.
+  `integrations.py` lo guarda en Drive.
 - **Frontend**: HTML/CSS/JS plano (`frontend/`), sin framework.
 - **Datos de referencia** (`data/`, no se commitean -- ver `data/README.md`):
   `Libro2.xlsx` (techo presupuestario, ambas fuentes) y `formulario 7
@@ -69,9 +72,8 @@ categoría es "sugerido"; la regla vigente es que también es un máximo.
 7. Abrir http://localhost:8890 -- ingresar con el admin, crear ahí un
    usuario por cada Secretaría que vaya a cargar (Usuarios → Crear usuario).
 
-Sin Drive ni SMTP configurados todo funciona igual: los aprobados quedan
-solo en el servidor (`cargas/`) y los mails no salen (queda en el log). Ver
-"Drive y mail" más abajo para activarlos.
+Sin Drive configurado todo funciona igual, pero los aprobados quedan solo
+en el servidor (`cargas/`). Ver "Drive" más abajo.
 
 Pruebas: `python -m unittest discover -s tests -v` (arman sus propias
 planillas y una base temporal; no necesitan los Excel de `data/`).
@@ -81,13 +83,12 @@ planillas y una base temporal; no necesitan los Excel de `data/`).
 - `POST /api/formularios/excel` (multipart: `categoria` + `archivo`): un
   área sube el Excel de una de sus categorías. Se valida entero
   (`backend/excel_import.py` + `backend/validations.py`) y:
-  - si está todo bien (201): se sube a Drive, se guardan sus ítems -- un
+  - si está todo bien (201): se sube a Drive y se guardan sus ítems -- un
     Excel reemplaza la carga anterior de esa categoría, incluida la de una
-    fuente que ya no traiga -- y se avisa por mail con el Excel adjunto;
+    fuente habilitada que ya no traiga;
   - si hay algún error (422): no se guarda nada y se devuelve la lista
     completa (`errores`, cada uno con `hoja`/`celda`/`mensaje`, o
-    `tipo: "techo"` con techo/solicitado/excedente). El mismo detalle va por
-    mail, con el Excel marcado.
+    `tipo: "techo"` con techo/solicitado/excedente).
   Cada intento queda registrado en `f7_carga_excel`.
 - `GET /api/mis-categorias`: las categorías del área (por fuente) con techo
   y cargado, el total de la Secretaría por fuente y el último Excel subido
@@ -164,33 +165,37 @@ Starter con disco (~USD 7/mes) o mover a Postgres.
 Como red de respaldo en cualquiera de los dos casos, cada Excel aprobado
 queda en Drive y además en `cargas/` en el servidor (`FORMULARIO7_CARGAS_DIR`).
 
-### Drive y mail
+### Drive
 
-Variables de entorno del backend (detalle en `backend/integrations.py`):
+Los Excel aprobados se guardan en la carpeta de Drive de Presupuesto
+(https://drive.google.com/drive/folders/13tEsPkFBoMysSdxdqQtC2s0LwuAqsGec).
+La subida pasa por un Apps Script (`scripts/drive_apps_script.gs`) que
+publica la **persona dueña de la carpeta**: corre con su cuenta, así que
+guarda en una carpeta común de "Mi unidad" sin proyecto de Google Cloud.
+Se configura una sola vez:
 
-- **Drive**: `GOOGLE_DRIVE_FOLDER_ID` (la carpeta destino) y las
-  credenciales de una **cuenta de servicio** de Google Cloud con la API de
-  Drive habilitada: `GOOGLE_DRIVE_CREDENTIALS_FILE` (ruta al JSON) o
-  `GOOGLE_DRIVE_CREDENTIALS_JSON` (el contenido, cómodo como secreto del
-  Codespace). Una cuenta de servicio no tiene espacio propio en "Mi unidad":
-  la carpeta tiene que estar en una **Unidad compartida** con la cuenta de
-  servicio como miembro (Administrador de contenido). Con
-  `REQUIRE_DRIVE_UPLOAD=1` no se aprueba ninguna carga si Drive no está
-  configurado o falla.
-- **Mail**: `SMTP_HOST`, `SMTP_PORT` (587 con STARTTLS, 465 SSL),
-  `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Destinatarios: `MAIL_TO`
-  (separados por coma; por defecto `dir.presupuesto@moron.gob.ar` y
-  `bessega.tadeo@moron.gob.ar`). Sale un mail por cada Excel aprobado (con
-  el archivo) y por cada rechazado (con la lista de errores y el Excel
-  marcado).
+1. Con la cuenta dueña de la carpeta, entrar a https://script.google.com →
+   **Nuevo proyecto**, borrar lo que trae y pegar `scripts/drive_apps_script.gs`.
+2. En `TOKEN` poner una clave larga inventada (no subirla al repo).
+3. **Implementar → Nueva implementación → Aplicación web**, con "Ejecutar
+   como: **Yo**" y "Quién tiene acceso: **Cualquier usuario**". Autorizar
+   el acceso a Drive cuando lo pida y copiar la URL (termina en `/exec`).
+4. En el backend, las variables `DRIVE_APPS_SCRIPT_URL` (esa URL) y
+   `DRIVE_TOKEN` (la misma clave), y reiniciarlo. En el Codespace conviene
+   cargarlas como secretos del Codespace (GitHub → Settings → Codespaces).
+5. Subir lo que se aprobó antes de configurar Drive:
+   `python scripts/subir_pendientes_a_drive.py --anio 2027`.
+
+Cada categoría tiene un solo archivo: al aprobarse un Excel nuevo, el
+anterior va a la papelera de Drive (se recupera de ahí durante 30 días).
+Con `REQUIRE_DRIVE_UPLOAD=1` no se aprueba ninguna carga si Drive no está
+configurado o falla.
 
 ## Pendiente (fuera de alcance de esta versión)
 
-- Configurar en el servidor la cuenta de servicio de Drive y el SMTP (ver
-  "Drive y mail"): hasta entonces los aprobados quedan solo en `cargas/` y
-  no sale ningún mail -- el admin ve todos los intentos en "Seguimiento".
-- Mandar el aviso de rechazo también al mail del área (hoy los usuarios no
-  tienen mail cargado; solo va a Presupuesto).
+- Configurar Drive en el servidor (ver "Drive"): hasta entonces los
+  aprobados quedan solo en `cargas/`; el admin ve todos los intentos en
+  "Seguimiento".
 - Que un usuario de área pueda cambiar su propia contraseña (hoy solo el
   admin la resetea).
 - Selector de año fiscal (hoy `ANIO_FISCAL` es una constante en `backend/app.py`, 2027).

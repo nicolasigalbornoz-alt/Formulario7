@@ -4,8 +4,8 @@ mismo espiritu que Pagv2/backend-local/app.py. Login real (auth.py). Cada
 area carga su Formulario 7 subiendo el Excel oficial de cada Categoria:
 se valida entero (excel_import.py: filas completas y precios;
 validations.py: techo de la Categoria y total de la Secretaria) y solo si
-pasa todo se registra y se guarda en Drive; si no, se rechaza con la lista
-de errores. Los dos casos se avisan por mail (integrations.py).
+pasa todo se registra y se guarda en Drive (integrations.py); si no, se
+rechaza con la lista de errores.
 
 Uso:
     python backend/app.py
@@ -19,7 +19,7 @@ Variables de entorno:
     FORMULARIO7_CARGAS_DIR donde se guarda una copia de cada Excel aprobado (default cargas/)
     FUENTES_HABILITADAS    fuentes de financiamiento que se muestran y se aceptan en el Excel,
                            separadas por coma (default 110 -- la 131 queda oculta; "110,131" la vuelve a mostrar)
-    Drive y mail: ver el docstring de integrations.py (GOOGLE_DRIVE_*, SMTP_*, MAIL_TO)
+    Drive: ver el docstring de integrations.py (DRIVE_APPS_SCRIPT_URL, DRIVE_TOKEN, REQUIRE_DRIVE_UPLOAD)
 """
 import hashlib
 import logging
@@ -216,11 +216,6 @@ def mis_categorias(usuario):
 
 # ================= Formularios =================
 
-def _quien(usuario):
-    nombre = usuario.get("nombre_completo")
-    return f"{usuario['username']} ({nombre})" if nombre else usuario["username"]
-
-
 def _guardar_copia_local(contenido, secretaria_id, nombre_destino):
     """Copia del Excel aprobado en el servidor (FORMULARIO7_CARGAS_DIR): el
     respaldo mientras Drive no este configurado, o si algun dia se pierde
@@ -236,44 +231,16 @@ def _guardar_copia_local(contenido, secretaria_id, nombre_destino):
         return None
 
 
-def _avisar_por_mail(carga_id, estado, *, contenido, errores=None, programa=None, totales=None, drive_link=None,
-                     **datos):
-    """Manda el aviso de la carga (aprobada o rechazada) en segundo plano:
-    el area ve el resultado en la pagina sin esperar al servidor de mail."""
-    if not integrations.mail_configurado():
-        log.info("SMTP no configurado: no se envia el aviso de la carga id=%s (%s).", carga_id, estado)
-        return
-    nombre_base = integrations.nombre_f7(datos["subjurisdiccion"], datos["categoria"])
-
-    def enviar():
-        if estado == "aprobado":
-            asunto, cuerpo = integrations.mail_aprobado(
-                programa=programa, totales=totales, drive_link=drive_link, **datos)
-            adjuntos = [(f"{nombre_base}.xlsx", contenido)]
-        else:
-            marcado = excel_import.marcar_errores(contenido, errores)
-            asunto, cuerpo = integrations.mail_rechazado(errores=errores, con_adjunto=marcado is not None, **datos)
-            adjuntos = [(f"{nombre_base}_con_errores.xlsx", marcado)] if marcado else []
-        integrations.enviar_mail(asunto, cuerpo, adjuntos)
-        with db.conexion() as conn:
-            db.marcar_mail_enviado(conn, carga_id)
-        log.info("Aviso por mail de la carga id=%s (%s) enviado a %s",
-                 carga_id, estado, ", ".join(integrations.destinatarios()))
-
-    integrations.en_segundo_plano(enviar)
-
-
 @app.route("/api/formularios/excel", methods=["POST"])
 @auth.login_required
 def cargar_excel_endpoint(usuario):
     """El area carga el Formulario 7 de una Categoria subiendo su Excel (la
     planilla oficial, un archivo por Categoria). Se acepta solo si pasa
     TODAS las validaciones -- filas completas, precios, techo de la
-    Categoria y techo total de la Secretaria --: ahi se guarda en Drive, se
-    registran sus items (reemplazando la carga anterior de la Categoria) y
-    se avisa por mail. Si algo falla se rechaza entero, no se guarda nada y
-    se devuelve la lista completa de errores (que tambien sale por mail).
-    Nunca devuelve un archivo."""
+    Categoria y techo total de la Secretaria --: ahi se guarda en Drive y
+    se registran sus items (reemplazando la carga anterior de la Categoria).
+    Si algo falla se rechaza entero, no se guarda nada y se devuelve la
+    lista completa de errores. Nunca devuelve un archivo."""
     if usuario["rol"] != "area":
         return jsonify({"ok": False, "error": "Solo un usuario de área puede cargar un Formulario 7."}), 403
 
@@ -302,6 +269,7 @@ def cargar_excel_endpoint(usuario):
     lectura = excel_import.leer_formulario(
         contenido, nombre_archivo=nombre_archivo, categoria=categoria, catalogo=catalogo,
         fuentes_categoria=set(cuotas), fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,
+        subjurisdiccion_secretaria=usuario.get("secretaria_subjurisdiccion"),
     )
     totales_por_fuente = dict(lectura["totales_por_fuente"])
     with db.conexion() as conn:
@@ -317,10 +285,6 @@ def cargar_excel_endpoint(usuario):
     ]
     total_general = float(sum(totales_por_fuente.values(), Decimal(0)))
     subjurisdiccion = usuario.get("secretaria_subjurisdiccion") or lectura["subjurisdiccion"]
-    datos_mail = {
-        "secretaria": usuario["secretaria_nombre"], "categoria": categoria, "subjurisdiccion": subjurisdiccion,
-        "nombre_archivo": nombre_archivo, "usuario": _quien(usuario),
-    }
     registro = {
         "secretaria_id": secretaria_id, "categoria": categoria, "anio_fiscal": ANIO_FISCAL,
         "nombre_archivo": nombre_archivo, "sha256": hashlib.sha256(contenido).hexdigest(),
@@ -330,21 +294,17 @@ def cargar_excel_endpoint(usuario):
     if errores:
         with db.conexion() as conn:
             carga_id = db.registrar_carga_excel(conn, estado="rechazado", errores=errores, **registro)
-        _avisar_por_mail(carga_id, "rechazado", contenido=contenido, errores=errores, **datos_mail)
         log.info("Excel rechazado: secretaria=%s categoria=%s archivo=%s errores=%s (carga id=%s)",
                  secretaria_id, categoria, nombre_archivo, len(errores), carga_id)
         return jsonify({
             "ok": False, "estado": "rechazado", "id": carga_id,
             "error": f"El Excel no se cargó: tiene {len(errores)} error(es). Corregilos en el archivo y volvé a subirlo.",
-            "errores": errores, "totales": totales, "mail": integrations.mail_configurado(),
+            "errores": errores, "totales": totales,
         }), 422
 
     nombre_destino = f"{integrations.nombre_f7(subjurisdiccion, categoria)}.xlsx"
-    with db.conexion() as conn:
-        anterior = db.ultima_carga_aprobada(conn, secretaria_id, categoria, ANIO_FISCAL)
     try:
-        drive = integrations.subir_a_drive(
-            nombre_destino, contenido, file_id_anterior=(anterior or {}).get("drive_file_id"))
+        drive = integrations.subir_a_drive(nombre_destino, contenido)
     except integrations.IntegracionError as exc:
         log.error("Excel valido pero no se pudo guardar en Drive (secretaria=%s categoria=%s): %s",
                   secretaria_id, categoria, exc)
@@ -365,14 +325,12 @@ def cargar_excel_endpoint(usuario):
         carga_id = db.registrar_carga_excel(
             conn, estado="aprobado", errores=None, drive_file_id=drive.get("id"),
             drive_link=drive.get("webViewLink"), archivo_local=archivo_local, **registro)
-    _avisar_por_mail(carga_id, "aprobado", contenido=contenido, programa=lectura["programa"], totales=totales,
-                     drive_link=drive.get("webViewLink"), **datos_mail)
 
     log.info("Excel aprobado: secretaria=%s categoria=%s total=%s items=%s drive=%s (carga id=%s)",
              secretaria_id, categoria, total_general, len(lectura["items"]), drive.get("id"), carga_id)
     return jsonify({
         "ok": True, "estado": "aprobado", "id": carga_id, "total": total_general, "totales": totales,
-        "items": len(lectura["items"]), "drive": bool(drive), "mail": integrations.mail_configurado(),
+        "items": len(lectura["items"]), "drive": bool(drive),
     }), 201
 
 
@@ -599,14 +557,14 @@ def seguimiento_endpoint(usuario):
 @app.route("/api/admin/cargas-excel", methods=["GET"])
 @auth.admin_required
 def cargas_excel_endpoint(usuario):
-    """Ultimos Excel subidos por las areas, aprobados y rechazados -- lo
-    mismo que llega por mail, visible aunque el SMTP no este configurado."""
+    """Ultimos Excel subidos por las areas, aprobados y rechazados, con el
+    link al archivo de Drive de los aprobados."""
     limite = max(1, min(request.args.get("limite", 100, type=int), 500))
     with db.conexion() as conn:
         cargas = db.listar_cargas_excel(conn, ANIO_FISCAL, limite=limite)
     return jsonify({
         "ok": True, "cargas": cargas, "anio_fiscal": ANIO_FISCAL,
-        "mail_configurado": integrations.mail_configurado(), "drive_configurado": integrations.drive_configurado(),
+        "drive_configurado": integrations.drive_configurado(),
     }), 200
 
 

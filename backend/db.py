@@ -618,22 +618,31 @@ def registrar_carga_excel(conn, *, secretaria_id, categoria, anio_fiscal, nombre
     return cur.lastrowid
 
 
-def marcar_mail_enviado(conn, carga_id):
-    conn.execute("UPDATE f7_carga_excel SET mail_enviado_en = datetime('now') WHERE id = ?", (carga_id,))
-
-
-def ultima_carga_aprobada(conn, secretaria_id, categoria, anio_fiscal):
-    """El ultimo Excel aprobado de la Categoria -- de ahi sale el archivo de
-    Drive a reemplazar cuando se aprueba uno nuevo (un archivo por Categoria)."""
-    fila = conn.execute(
+def aprobadas_sin_drive(conn, anio_fiscal):
+    """El ultimo Excel aprobado de cada Categoria que todavia no esta en
+    Drive (se aprobo con Drive sin configurar) -- lo que sube
+    scripts/subir_pendientes_a_drive.py. Los aprobados anteriores de la
+    misma Categoria ya quedaron reemplazados, no hace falta subirlos."""
+    filas = conn.execute(
         """
         SELECT * FROM f7_carga_excel
-        WHERE secretaria_id = ? AND categoria = ? AND anio_fiscal = ? AND estado = 'aprobado'
-        ORDER BY id DESC LIMIT 1
+        WHERE id IN (
+            SELECT MAX(id) FROM f7_carga_excel
+            WHERE anio_fiscal = ? AND estado = 'aprobado'
+            GROUP BY secretaria_id, categoria
+        ) AND drive_file_id IS NULL
+        ORDER BY id
         """,
-        (secretaria_id, categoria, anio_fiscal),
-    ).fetchone()
-    return dict(fila) if fila else None
+        (anio_fiscal,),
+    ).fetchall()
+    return [dict(f) for f in filas]
+
+
+def marcar_en_drive(conn, carga_id, drive_file_id, drive_link):
+    conn.execute(
+        "UPDATE f7_carga_excel SET drive_file_id = ?, drive_link = ? WHERE id = ?",
+        (drive_file_id, drive_link, carga_id),
+    )
 
 
 def _carga_publica(fila):
@@ -666,7 +675,7 @@ def listar_cargas_excel(conn, anio_fiscal, limite=100):
     filas = conn.execute(
         """
         SELECT c.id, c.categoria, c.nombre_archivo, c.estado, c.total, c.errores,
-               c.drive_link, c.mail_enviado_en, c.subido_en,
+               c.drive_link, c.subido_en,
                s.nombre AS secretaria, u.username AS subido_por_username
         FROM f7_carga_excel c
         JOIN secretaria s ON s.id = c.secretaria_id

@@ -147,8 +147,8 @@ CREATE TABLE IF NOT EXISTS f7_item (
 CREATE INDEX IF NOT EXISTS idx_f7_item_submission ON f7_item(submission_id);
 
 -- Un registro por cada Excel que sube un area, aprobado o rechazado: que
--- archivo, quien, cuando y, si se rechazo, por que (lo mismo que se manda
--- por mail). Los items de un Excel aprobado quedan en f7_submission/f7_item.
+-- archivo, quien, cuando y, si se rechazo, por que. Los items de un Excel
+-- aprobado quedan en f7_submission/f7_item.
 CREATE TABLE IF NOT EXISTS f7_carga_excel (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     secretaria_id    INTEGER NOT NULL REFERENCES secretaria(id),
@@ -159,10 +159,9 @@ CREATE TABLE IF NOT EXISTS f7_carga_excel (
     estado           TEXT NOT NULL CHECK (estado IN ('aprobado','rechazado')),
     total            NUMERIC(16,2),              -- suma de las filas que se pudieron calcular, todas las fuentes
     errores          TEXT,                        -- JSON con la lista de errores (solo si se rechazo)
-    drive_file_id    TEXT,                        -- NULL si Drive no esta configurado
+    drive_file_id    TEXT,                        -- NULL = todavia no esta en Drive (scripts/subir_pendientes_a_drive.py)
     drive_link       TEXT,
     archivo_local    TEXT,                        -- copia del aprobado en el servidor (ver FORMULARIO7_CARGAS_DIR)
-    mail_enviado_en  TEXT,                        -- NULL = no salio el mail (SMTP sin configurar o error, ver log)
     subido_por       INTEGER NOT NULL REFERENCES usuario(id),
     subido_en        TEXT NOT NULL DEFAULT (datetime('now'))
 );

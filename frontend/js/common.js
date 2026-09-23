@@ -103,7 +103,7 @@ function montarFooterSoporte() {
   const el = document.getElementById("footer-soporte");
   if (!el) return;
   const links = SOPORTE_EMAILS.map(e => `<a href="mailto:${e}">${e}</a>`).join(" o ");
-  el.innerHTML = `¿Problemas para cargar el formulario? Escribinos a ${links}.`;
+  el.innerHTML = `¿Dudas o consultas sobre el techo presupuestario o la carga? Escribinos a ${links}.`;
 }
 
 document.addEventListener("DOMContentLoaded", montarFooterSoporte);
