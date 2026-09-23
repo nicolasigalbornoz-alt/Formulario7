@@ -6,10 +6,18 @@ function formatoPesos(monto) {
 
 function formatoFecha(iso) {
   if (!iso) return "--";
-  // Las fechas de la base vienen "YYYY-MM-DD HH:MM:SS" en hora del servidor.
+  // Las fechas de la base vienen "YYYY-MM-DD HH:MM:SS" en UTC (es lo que
+  // guarda datetime('now') de SQLite): se muestran en la hora local.
   const [fecha, hora] = iso.split(" ");
-  const [anio, mes, dia] = fecha.split("-");
-  return `${dia}/${mes}/${anio}${hora ? " " + hora.slice(0, 5) : ""}`;
+  if (!hora) {
+    const [anio, mes, dia] = fecha.split("-");
+    return `${dia}/${mes}/${anio}`;
+  }
+  const local = new Date(`${fecha}T${hora}Z`);
+  if (Number.isNaN(local.getTime())) return iso;
+  const dos = (n) => String(n).padStart(2, "0");
+  return `${dos(local.getDate())}/${dos(local.getMonth() + 1)}/${local.getFullYear()} `
+    + `${dos(local.getHours())}:${dos(local.getMinutes())}`;
 }
 
 function escapeHtml(s) {
@@ -42,6 +50,16 @@ async function requerirSesion(rolesPermitidos) {
     return null;
   }
   return usuario;
+}
+
+/** Llena un selector de fuente con las fuentes habilitadas en el servidor
+ * (FUENTES_HABILITADAS; hoy solo la 110). Con una sola queda deshabilitado,
+ * mostrando igual cual es. */
+async function cargarSelectorFuentes(select) {
+  const { fuentes } = await Api.fuentes();
+  if (fuentes.length === 0) return;
+  select.innerHTML = fuentes.map(f => `<option value="${f.id}">Fuente ${f.id}</option>`).join("");
+  select.disabled = fuentes.length === 1;
 }
 
 const NAV_ADMIN = [
