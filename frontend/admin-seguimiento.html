@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Seguimiento</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Avance general de carga</h2>
+        <p class="card-desc">Categorías con Formulario 7 ya enviado, sobre el total de categorías con techo presupuestario asignado.</p>
+      </div>
+      <select id="sel-fuente" style="min-width:140px;">
+        <option value="110">Fuente 110</option>
+        <option value="131">Fuente 131</option>
+      </select>
+    </div>
+    <div id="resumen-general"></div>
+  </div>
+
+  <div class="card">
+    <h2>Por Secretaría</h2>
+    <div id="alerta"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Secretaría</th>
+          <th style="width:160px;">Avance</th>
+          <th class="num">Cargadas</th>
+          <th>Última carga</th>
+          <th>Categorías pendientes</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-seguimiento"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/admin-seguimiento.js"></script>
+</body>
+</html>

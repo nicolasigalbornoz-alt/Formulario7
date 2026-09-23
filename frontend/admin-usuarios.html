@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Usuarios</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="card">
+    <h2>Crear usuario</h2>
+    <p class="card-desc">Un usuario de área carga el Formulario 7 solo de su Secretaría. Un administrador ve y gestiona todo.</p>
+    <div id="alerta-crear"></div>
+    <form id="form-crear">
+      <div class="grid-2">
+        <div class="campo">
+          <label for="in-username">Usuario</label>
+          <input type="text" id="in-username" required>
+        </div>
+        <div class="campo">
+          <label for="in-password">Contraseña</label>
+          <input type="password" id="in-password" required minlength="8">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="campo">
+          <label for="in-nombre">Nombre completo (opcional)</label>
+          <input type="text" id="in-nombre">
+        </div>
+        <div class="campo">
+          <label for="sel-rol">Rol</label>
+          <select id="sel-rol">
+            <option value="area">Área</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+      </div>
+      <div class="campo" id="campo-secretaria">
+        <label for="sel-secretaria-nueva">Secretaría</label>
+        <select id="sel-secretaria-nueva"></select>
+      </div>
+      <button type="submit" class="btn btn-primary">Crear usuario</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Usuarios existentes</h2>
+    <div id="alerta-lista"></div>
+    <table>
+      <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Secretaría</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody id="tbody-usuarios"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/admin-usuarios.js"></script>
+</body>
+</html>

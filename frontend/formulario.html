@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Carga</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="instructivo">
+    <strong>Cómo completar el Formulario 7</strong>
+    <ul>
+      <li>Elegí la <strong>Fuente de financiamiento</strong> y la <strong>Categoría programática</strong> que vas a cargar.</li>
+      <li>Elegís el nombre del bien de la lista y el sistema completa código, unidad y precio solo. Vos cargás la cantidad.</li>
+      <li>Las cantidades van siempre en <strong>números enteros</strong> (sin decimales).</li>
+      <li>Toda fila que cargues tiene que tener <strong>todos sus datos completos</strong> -- si falta algo, el sistema te lo va a señalar antes de dejarte enviar.</li>
+      <li>El techo presupuestario <strong>por categoría es sugerido</strong>: se puede superar en una categoría si se compensa gastando menos en otra. Lo que <strong>no se puede superar es el total de tu Secretaría</strong> (para esa fuente) -- ahí sí se bloquea el envío.</li>
+      <li>Una vez enviado, podés <strong>descargar el Excel</strong> con los datos ya cargados.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Categoría a cargar</h2>
+    <div class="grid-2">
+      <div class="campo">
+        <label for="sel-fuente">Fuente de financiamiento</label>
+        <select id="sel-fuente">
+          <option value="110">110</option>
+          <option value="131">131</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="sel-categoria">Categoría programática</label>
+        <select id="sel-categoria"></select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="campo">
+        <label>Subjurisdicción</label>
+        <input type="text" id="in-subjurisdiccion" disabled>
+      </div>
+      <div class="campo">
+        <label for="in-programa">Programa o Actividades centrales (opcional)</label>
+        <input type="text" id="in-programa">
+      </div>
+    </div>
+    <div id="info-categoria"></div>
+  </div>
+
+  <div class="card">
+    <h2>Total de tu Secretaría <span id="fuente-actual-label"></span></h2>
+    <p class="card-desc">Esto es lo que no podés superar -- es la suma de los techos de todas tus categorías en esta fuente.</p>
+    <div id="resumen-secretaria"></div>
+  </div>
+
+  <div class="card" id="card-items" hidden>
+    <h2>Ítems</h2>
+    <div id="alerta-form"></div>
+
+    <div class="campo autocomplete">
+      <label for="buscar-bien">Agregar bien del listado</label>
+      <input type="text" id="buscar-bien" placeholder="Escribí el nombre del bien... (ej. arroz)" autocomplete="off">
+      <div class="autocomplete-lista" id="lista-sugerencias" hidden></div>
+    </div>
+
+    <div id="filas-items" style="margin-top:14px;"></div>
+
+    <div class="resumen-total">
+      <div>
+        <div style="font-size:12.5px;color:var(--text-muted);">Total de esta carga (detalle)</div>
+        <div class="monto" id="monto-total">$0</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:12.5px;color:var(--text-muted);">Techo presupuestario sugerido en <span id="cat-actual"></span></div>
+        <div class="monto" id="monto-disponible">--</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+      <a class="btn btn-secundario" id="link-descargar-excel" href="#" hidden download>Descargar Excel</a>
+      <button type="button" class="btn btn-primary" id="btn-enviar">Enviar Formulario 7</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Mis cargas <span id="fuente-actual-label-2"></span></h2>
+    <p class="card-desc">Estado de las categorías de tu Secretaría en la fuente elegida arriba.</p>
+    <table>
+      <thead><tr><th>Categoría</th><th class="num">Techo presupuestario</th><th class="num">Cargado</th><th>Estado</th><th>Última carga</th><th></th></tr></thead>
+      <tbody id="tbody-mis-cargas"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/formulario.js"></script>
+</body>
+</html>

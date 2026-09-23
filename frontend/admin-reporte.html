@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulario 7 -- Reporte de techo presupuestario</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="topbar" id="topbar"></div>
+
+<main>
+  <div class="card">
+    <h2>Secretarías</h2>
+    <p class="card-desc">Subjurisdicción de cada Secretaría (código RAFAM fijo) -- el área la ve de solo lectura en su formulario, acá es donde se carga. Hacé clic para editarla.</p>
+    <div id="alerta-secretarias"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th>Subjurisdicción</th></tr></thead>
+      <tbody id="tbody-secretarias"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Totales por Secretaría</h2>
+        <p class="card-desc">Hacé clic sobre un monto para editarlo.</p>
+      </div>
+      <select id="sel-fuente" style="min-width:140px;">
+        <option value="110">Fuente 110</option>
+        <option value="131">Fuente 131</option>
+      </select>
+    </div>
+    <div id="alerta-totales"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th class="num">Techo presupuestario</th><th class="num">Cargado</th><th class="num">Disponible</th></tr></thead>
+      <tbody id="tbody-totales"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Detalle por Categoría</h2>
+        <p class="card-desc">Hacé clic sobre el techo para editarlo.</p>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="sel-secretaria" style="min-width:220px;"></select>
+        <a class="btn btn-secundario btn-chico" id="link-csv" href="#" download>Exportar CSV</a>
+      </div>
+    </div>
+    <div id="alerta-categorias"></div>
+    <table>
+      <thead><tr><th>Secretaría</th><th>Categoría</th><th class="num">Techo presupuestario</th><th class="num">Cargado</th><th class="num">Disponible</th></tr></thead>
+      <tbody id="tbody-categorias"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="soporte" id="footer-soporte"></footer>
+
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script src="js/admin-reporte.js"></script>
+</body>
+</html>
