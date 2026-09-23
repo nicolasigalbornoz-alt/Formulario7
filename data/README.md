@@ -53,13 +53,13 @@ ya no se usa: la página no genera archivos.
 
 ## Excels a Drive
 
-El backend sube a Drive cada Excel **aprobado**, con una cuenta de servicio
-de Google Cloud (variables `GOOGLE_DRIVE_*`, ver README de la raíz y
-`backend/integrations.py`): un archivo por Categoría,
-`F7_Subjurisdicción_Categoría.xlsx`, que se reemplaza (con historial de
-versiones en Drive) cada vez que se aprueba un Excel nuevo de esa
-Categoría. Además queda una copia en `cargas/` en el servidor (gitignored).
-Los rechazados no van a Drive.
+El backend sube a la carpeta de Drive de Presupuesto cada Excel
+**aprobado**, a través de un Apps Script publicado por la persona dueña de
+la carpeta (`scripts/drive_apps_script.gs`; pasos en el README de la raíz,
+sección "Drive"). Un archivo por Categoría, `F7_Subjurisdicción_Categoría.xlsx`:
+cuando se aprueba uno nuevo, el anterior va a la papelera de Drive. Además
+queda una copia en `cargas/` en el servidor (gitignored). Los rechazados no
+van a Drive.
 
 ## Actualizar
 

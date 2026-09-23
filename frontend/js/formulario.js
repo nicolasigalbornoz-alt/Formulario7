@@ -66,9 +66,11 @@
     const aviso = filas.some(f => f.submission_id)
       ? `<div class="alerta alerta-warn">Esta categoría ya tiene un Excel aprobado. Si subís otro, <strong>reemplaza al anterior</strong> entero.</div>`
       : "";
+    const nombreArchivo = `F7_${usuario.secretaria_subjurisdiccion || "<Subjurisdicción>"}_${selCategoria.value}.xlsx`;
     infoCategoria.innerHTML = `
       <p class="card-desc">Techo de la categoría ${escapeHtml(selCategoria.value)} -- sus filas solo pueden tener fuente ${fuentes}:</p>
-      <ul class="lista-techos">${techos}</ul>${aviso}`;
+      <ul class="lista-techos">${techos}</ul>
+      <p class="card-desc">El archivo tiene que llamarse <strong>${escapeHtml(nombreArchivo)}</strong>.</p>${aviso}`;
   }
 
   function renderResumenSecretaria() {
@@ -129,14 +131,10 @@
 
   function renderAprobado(r, categoria, nombre) {
     const porFuente = r.totales.map(t => `fuente ${t.fuente}: ${formatoPesos(t.total)}`).join(" · ");
-    const extras = [
-      r.drive ? "Quedó guardado en Drive." : "",
-      r.mail ? "Se avisó por mail a Dirección de Presupuesto." : "",
-    ].filter(Boolean).join(" ");
     resultado.innerHTML = `
       <div class="alerta alerta-ok">
         <strong>Excel aprobado y cargado.</strong> Categoría ${escapeHtml(categoria)} (${escapeHtml(nombre)}):
-        ${r.items} ítem(s), total ${formatoPesos(r.total)} -- ${porFuente}. ${extras}
+        ${r.items} ítem(s), total ${formatoPesos(r.total)} -- ${porFuente}.${r.drive ? " Quedó guardado en Drive." : ""}
       </div>`;
   }
 
@@ -155,7 +153,8 @@
     let html = `
       <div class="alerta alerta-error">
         <strong>El Excel no se cargó.</strong> ${escapeHtml(nombre)} tiene ${p.errores.length} error(es):
-        corregilos en el archivo y volvé a subirlo.${p.mail ? " El detalle también se envió por mail a Dirección de Presupuesto." : ""}
+        corregilos en el archivo y volvé a subirlo. Si tenés dudas sobre el techo o la carga, escribí a
+        ${SOPORTE_EMAILS.map(e => `<a href="mailto:${e}">${e}</a>`).join(" o ")}.
       </div>`;
     if (techos.length) html += listaDeErrores("Techo presupuestario superado", techos);
     if (generales.length) html += listaDeErrores("Problemas con el archivo", generales);

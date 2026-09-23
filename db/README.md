@@ -53,7 +53,7 @@ necesitaría su propio `ALTER TABLE`.
   precios.
 - `f7_carga_excel`: un registro por cada Excel subido, aprobado o
   rechazado -- archivo, quién, cuándo, errores (JSON), archivo en Drive,
-  copia local y si salió el mail.
+  copia local.
 
 ## Por qué no hay un total cacheado en `f7_submission`
 
