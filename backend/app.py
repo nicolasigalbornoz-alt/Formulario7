@@ -40,7 +40,16 @@ app.secret_key = os.environ.get("SECRET_KEY")
 if not app.secret_key:
     app.secret_key = "dev-secret-cambiar-en-produccion"
     log.warning("SECRET_KEY no seteada -- usando una clave de desarrollo. No usar asi en produccion.")
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+# SameSite=None + Secure, no Lax: frontend (GitHub Pages) y backend (este
+# Codespace / Render / etc.) viven en dominios distintos de verdad -- no
+# son "same-site" como localhost:8890 vs localhost:5190 (ahi Lax alcanzaba
+# porque el navegador considera "sitio" al dominio, no al puerto). Con
+# dominios distintos, SameSite=Lax bloquea la cookie en el fetch entre
+# sitios: el login devolvia 200 pero la sesion se perdia en el siguiente
+# request. None requiere Secure (solo HTTPS) -- ya estamos siempre en
+# HTTPS en cualquier deploy real, y en local http://localhost el browser
+# igual permite cookies "Secure" sobre ese origen especial.
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="None", SESSION_COOKIE_SECURE=True)
 
 
 @app.before_request
