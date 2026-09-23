@@ -1,5 +1,7 @@
 // Unica linea a cambiar para apuntar al backend ya desplegado (ver README.md).
-const API_BASE = "http://localhost:5190";
+// Backend corriendo en un GitHub Codespace (ver README.md, seccion "Deploy") --
+// se cae si el Codespace se detiene o pasa su limite de horas gratis.
+const API_BASE = "https://legendary-fishstick-jjx7q79v7497h7j5-5190.app.github.dev";
 
 const SOPORTE_EMAILS = ["dir.presupuesto@moron.gob.ar", "bessega.tadeo@moron.gob.ar"];
 const SOPORTE_TEXTO = `Si el problema persiste, escribí a ${SOPORTE_EMAILS.join(" o ")}.`;
