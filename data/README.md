@@ -44,6 +44,20 @@ solo que ahora la carga de datos es por la página en vez de tipeando en la
 planilla. La hoja "F7 especial" queda siempre vacía (ya no se cargan
 ítems especiales en esta versión).
 
+## Excels a Drive
+
+`scripts/exportar_todos_los_excel.py` baja a `exports/` (gitignored) el
+Excel de todas las cargas ya enviadas, pegando contra la API del backend
+-- es el primer paso para subirlas a una carpeta de Drive. El script en sí
+no tiene credenciales de Google ni sube nada: el backend Flask tampoco
+tiene credenciales propias de Google Drive (eso requeriría una cuenta de
+servicio de Google Cloud, que nadie configuró todavía). Por ahora la
+subida a Drive la hace Claude a pedido, con su propio acceso a Drive del
+usuario, tomando los archivos que deja este script. Si en algún momento
+hace falta que quede automático (sin que alguien lo pida), ahí sí hay que
+dar de alta una cuenta de servicio de Google Cloud con acceso a la
+carpeta y cablear `backend/excel_export.py` para que suba directo.
+
 ## Actualizar
 
 Reemplazar el archivo correspondiente acá y correr de nuevo el script de

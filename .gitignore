@@ -9,6 +9,7 @@ data/*.xls
 ~$*.xlsx
 db/*.db
 db/*.db-journal
+exports/
 
 # Locales / editor
 .DS_Store

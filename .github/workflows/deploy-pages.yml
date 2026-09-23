@@ -1,0 +1,37 @@
+name: Publicar frontend en GitHub Pages
+
+# Publica solo frontend/ (el sitio estatico) -- el backend Flask no corre
+# aca (GitHub Pages solo sirve archivos estaticos). El frontend sigue
+# apuntando a API_BASE en frontend/js/api.js: mientras esa URL sea
+# http://localhost:5190, la version publicada solo funciona para quien
+# tenga el backend corriendo en su propia maquina. Actualizar API_BASE a
+# la URL real del backend una vez que este alojado en algun lado publico.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend
+      - id: deployment
+        uses: actions/deploy-pages@v4
