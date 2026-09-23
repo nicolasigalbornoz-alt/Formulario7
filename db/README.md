@@ -23,7 +23,7 @@ necesitaría su propio `ALTER TABLE`.
   `Libro2.xlsx` al importar la cuota. `subjurisdiccion` (código RAFAM de
   10 dígitos) la carga el admin a mano (`PATCH /api/admin/secretarias/<id>`,
   panel "Reporte de techo presupuestario") -- el Excel de origen no la trae.
-  Se usa para nombrar el Excel aprobado (`F7_Subjurisdicción_Categoría`).
+  Es un dato de referencia (no se valida contra el Excel).
 - `fuente_financiamiento`: catálogo fijo. Se activa sola (`activa=1`) al
   correr `build_cuota_data.py`, si esa fuente tiene datos en el Excel.
 - `usuario`: login real. `rol` `area` (atado a una `secretaria_id`) o

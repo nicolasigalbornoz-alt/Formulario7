@@ -131,7 +131,8 @@ def crear_usuario(conn, *, username, password_hash, rol, secretaria_id=None, nom
 def obtener_usuario_por_username(conn, username):
     fila = conn.execute(
         """
-        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion,
+               s.jur AS secretaria_jur
         FROM usuario u LEFT JOIN secretaria s ON s.id = u.secretaria_id
         WHERE u.username = ?
         """,
@@ -143,7 +144,8 @@ def obtener_usuario_por_username(conn, username):
 def obtener_usuario_por_id(conn, usuario_id):
     fila = conn.execute(
         """
-        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion,
+               s.jur AS secretaria_jur
         FROM usuario u LEFT JOIN secretaria s ON s.id = u.secretaria_id
         WHERE u.id = ?
         """,
@@ -169,7 +171,8 @@ def obtener_usuario_por_token(conn, token):
     valido (mismo criterio que tenia la sesion de cookie)."""
     fila = conn.execute(
         """
-        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion
+        SELECT u.*, s.nombre AS secretaria_nombre, s.subjurisdiccion AS secretaria_subjurisdiccion,
+               s.jur AS secretaria_jur
         FROM sesion se
         JOIN usuario u ON u.id = se.usuario_id
         LEFT JOIN secretaria s ON s.id = u.secretaria_id
@@ -625,13 +628,14 @@ def aprobadas_sin_drive(conn, anio_fiscal):
     misma Categoria ya quedaron reemplazados, no hace falta subirlos."""
     filas = conn.execute(
         """
-        SELECT * FROM f7_carga_excel
-        WHERE id IN (
+        SELECT c.*, s.jur AS secretaria_jur, s.nombre AS secretaria_nombre
+        FROM f7_carga_excel c JOIN secretaria s ON s.id = c.secretaria_id
+        WHERE c.id IN (
             SELECT MAX(id) FROM f7_carga_excel
             WHERE anio_fiscal = ? AND estado = 'aprobado'
             GROUP BY secretaria_id, categoria
-        ) AND drive_file_id IS NULL
-        ORDER BY id
+        ) AND c.drive_file_id IS NULL
+        ORDER BY c.id
         """,
         (anio_fiscal,),
     ).fetchall()

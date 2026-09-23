@@ -56,8 +56,9 @@ ya no se usa: la página no genera archivos.
 El backend sube a la carpeta de Drive de Presupuesto cada Excel
 **aprobado**, a través de un Apps Script publicado por la persona dueña de
 la carpeta (`scripts/drive_apps_script.gs`; pasos en el README de la raíz,
-sección "Drive"). Un archivo por Categoría, `F7_Subjurisdicción_Categoría.xlsx`:
-cuando se aprueba uno nuevo, el anterior va a la papelera de Drive. Además
+sección "Drive"): una subcarpeta por jurisdicción (`04 - Salud`) y un
+archivo por Categoría con su nombre (`22.01.00.xlsx`); cuando se aprueba uno
+nuevo, el anterior va a la papelera de Drive. Además
 queda una copia en `cargas/` en el servidor (gitignored). Los rechazados no
 van a Drive.
 

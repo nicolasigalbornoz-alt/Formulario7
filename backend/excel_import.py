@@ -19,13 +19,10 @@ Reglas, tal cual el instructivo de la propia planilla:
   Presupuesto no puede ir aca: va en "F7 común". Un bien que figura en el
   listado tiene que estar copiado de ahi (mismo codigo, denominacion y
   unidad); uno que no figura se carga a mano.
-- Toda fila con algun dato tiene que tener todas sus columnas completas, y
-  tambien las celdas pintadas del encabezado de "F7 común": Subjurisdiccion
-  (C6), Fecha (G6) y Programa o Actividades centrales (A7).
+- Toda fila con algun dato tiene que tener todas sus columnas completas.
 - Las cantidades, numeros enteros.
-- El archivo se llama F7_Subjurisdiccion_Categoria programatica.xlsx (ej.
-  F7_1110101000_01.01.00.xlsx), igual que el asunto con el que el
-  instructivo pide mandarlo a Presupuesto.
+El encabezado (Subjurisdiccion, Fecha, Programa) y el nombre del archivo no
+se validan: el archivo puede llamarse de cualquier manera.
 
 No corta en el primer error: junta todos, cada uno con su hoja y celda,
 para que el area corrija todo de una vez.
@@ -66,13 +63,8 @@ ENTRADAS = {"comun": ("A", "C", "E"), "especial": ("A", "B", "C", "D", "E", "F")
 # columnas son las de la planilla oficial (comparados sin tildes).
 ENCABEZADOS = {"A": "fuente", "C": "denominacion", "E": "cantidad", "F": "precio"}
 
-# F7_Subjurisdiccion_Categoria.xlsx; se tolera el " (1)" que agrega Windows
-# a una copia descargada dos veces.
-NOMBRE_ARCHIVO = re.compile(r"^F7_(?P<sub>[^_]*)_(?P<cat>[^_]*?)(?:\s*\(\d+\))?\.xlsx$", re.IGNORECASE)
-CATEGORIA = re.compile(r"^\d{2}\.\d{2}\.\d{2}$")
-SUBJURISDICCION = re.compile(r"^\d{10}$")
-# Celdas pintadas del encabezado de "F7 común" que tiene que completar el area.
-CELDA_SUBJURISDICCION, CELDA_FECHA, CELDA_PROGRAMA = "C6", "G6", "A7"
+# Celdas del encabezado de "F7 común" que se leen como dato (no se validan).
+CELDA_SUBJURISDICCION, CELDA_PROGRAMA = "C6", "A7"
 ROTULO_PROGRAMA = re.compile(r"^\s*programa o actividades centrales\s*:?\s*", re.IGNORECASE)
 # Margen para redondeos de Excel al comparar precio / costo total.
 TOLERANCIA = Decimal("0.5")
@@ -390,72 +382,22 @@ def _encabezado_valido(fila_encabezado):
     return all(esperado in _normalizar(celdas[letra] or "") for letra, esperado in ENCABEZADOS.items())
 
 
-def _validar_encabezado(hoja, filas, subjurisdiccion_secretaria, resultado):
-    """Las celdas pintadas del encabezado de "F7 común", que el instructivo
-    tambien pide completar: Subjurisdiccion (C6, el codigo de 10 digitos),
-    Fecha (G6) y Programa o Actividades centrales (A7, a continuacion del
-    rotulo). Deja en `resultado` la subjurisdiccion y el programa."""
+def _datos_de_encabezado(filas, resultado):
+    """Subjurisdiccion (C6) y Programa o Actividades centrales (A7) de "F7
+    común": se guardan como dato de referencia, no se validan."""
     def celda(ref):
         fila, columna = int(ref[1:]) - 1, ord(ref[0]) - ord("A")
         return filas[fila][columna] if fila < len(filas) and columna < len(filas[fila]) else None
 
-    def error(ref, campo, mensaje):
-        resultado["errores"].append(_error(hoja, int(ref[1:]), ref[0], mensaje, campo=campo))
-
-    sub = None if _vacio(celda(CELDA_SUBJURISDICCION)) else _texto(celda(CELDA_SUBJURISDICCION))
-    if sub is None:
-        error(CELDA_SUBJURISDICCION, "Subjurisdicción",
-              "Falta completar la Subjurisdicción (el código de 10 dígitos, ej. 1110101000).")
-    elif not SUBJURISDICCION.match(sub):
-        error(CELDA_SUBJURISDICCION, "Subjurisdicción",
-              f"La Subjurisdicción tiene que ser el código de 10 dígitos (ej. 1110101000); la planilla dice «{sub}».")
-        sub = None
-    elif subjurisdiccion_secretaria and sub != subjurisdiccion_secretaria:
-        error(CELDA_SUBJURISDICCION, "Subjurisdicción",
-              f"La Subjurisdicción de tu Secretaría es {subjurisdiccion_secretaria}; la planilla dice {sub}.")
-    resultado["subjurisdiccion"] = sub
-
-    # La fecha va en G6 (H6 e I6 tambien estan pintadas: se acepta en cualquiera).
-    if all(_vacio(celda(ref)) for ref in (CELDA_FECHA, "H6", "I6")):
-        error(CELDA_FECHA, "Fecha", "Falta completar la Fecha.")
-
+    sub = celda(CELDA_SUBJURISDICCION)
+    resultado["subjurisdiccion"] = None if _vacio(sub) else _texto(sub)
     resto = ROTULO_PROGRAMA.sub("", str(celda(CELDA_PROGRAMA) or "")).strip()
     fila_programa = filas[6][1:] if len(filas) > 6 else ()
-    programa = _texto(resto) if resto else next((_texto(v) for v in fila_programa if not _vacio(v)), None)
-    if programa is None:
-        error(CELDA_PROGRAMA, "Programa o Actividades centrales",
-              "Falta completar «Programa o Actividades centrales» (escribilo a continuación del rótulo).")
-    resultado["programa"] = programa
+    resultado["programa"] = (_texto(resto) if resto
+                             else next((_texto(v) for v in fila_programa if not _vacio(v)), None))
 
 
-def _validar_nombre(nombre_archivo, categoria, subjurisdiccion, origen):
-    """El nombre que pide el instructivo: F7_Subjurisdiccion_Categoria
-    programatica (ej. F7_1110101000_01.01.00.xlsx), con la categoria elegida
-    y la subjurisdiccion que corresponde (`origen` dice de donde sale, para
-    el mensaje)."""
-    sugerido = f"F7_{subjurisdiccion or '<Subjurisdicción>'}_{categoria}.xlsx"
-    partes = NOMBRE_ARCHIVO.match(nombre_archivo or "")
-    if partes is None or not CATEGORIA.match(partes["cat"]):
-        return [_error(None, None, None,
-            f"El archivo tiene que llamarse F7_Subjurisdicción_Categoría programática (ej. "
-            f"F7_1110101000_01.01.00.xlsx): renombralo como {sugerido}.")]
-    errores = []
-    if partes["cat"] != categoria:
-        errores.append(_error(None, None, None,
-            f"El nombre del archivo («{nombre_archivo}») es de la categoría {partes['cat']}, pero elegiste la "
-            f"{categoria}. Revisá que estés subiendo el Excel de esta categoría."))
-    if subjurisdiccion and partes["sub"] != subjurisdiccion:
-        errores.append(_error(None, None, None,
-            f"El nombre del archivo tiene la subjurisdicción «{partes['sub']}», pero tiene que ser "
-            f"{subjurisdiccion} ({origen}): renombralo como {sugerido}."))
-    elif not subjurisdiccion and not SUBJURISDICCION.match(partes["sub"]):
-        errores.append(_error(None, None, None,
-            f"La subjurisdicción del nombre del archivo («{partes['sub']}») tiene que ser el código de 10 dígitos: "
-            f"renombralo como {sugerido}."))
-    return errores
-
-
-def _leer_libro(contenido, ctx, subjurisdiccion_secretaria, resultado):
+def _leer_libro(contenido, ctx, resultado):
     """Devuelve False si el archivo no se pudo leer como la planilla."""
     try:
         with warnings.catch_warnings():
@@ -470,17 +412,17 @@ def _leer_libro(contenido, ctx, subjurisdiccion_secretaria, resultado):
     try:
         hojas = {_normalizar(nombre): nombre for nombre in libro.sheetnames}
         comun, especial = hojas.get(_normalizar(HOJA_COMUN)), hojas.get(_normalizar(HOJA_ESPECIAL))
-        if comun is None:
+        if comun is None and especial is None:
             resultado["errores"].append(_error(None, None, None,
-                f"El archivo no es la planilla del Formulario 7: no tiene la hoja «{HOJA_COMUN}»."))
+                f"El archivo no es la planilla del Formulario 7: no tiene las hojas «{HOJA_COMUN}» ni "
+                f"«{HOJA_ESPECIAL}»."))
             return False
 
         for nombre, tipo in ((comun, "comun"), (especial, "especial")):
             if nombre is None:
-                continue  # sin bienes especiales se puede borrar esa hoja
+                continue  # sin bienes de un tipo se puede borrar esa hoja
             ws = libro[nombre]
-            # Hasta la columna I: la fecha puede estar en G6, H6 o I6.
-            encabezado = list(ws.iter_rows(min_row=1, max_row=FILA_ENCABEZADO, max_col=9, values_only=True))
+            encabezado = list(ws.iter_rows(min_row=1, max_row=FILA_ENCABEZADO, max_col=len(LETRAS), values_only=True))
             if len(encabezado) < FILA_ENCABEZADO or not _encabezado_valido(encabezado[FILA_ENCABEZADO - 1]):
                 resultado["errores"].append(_error(nombre, FILA_ENCABEZADO, None,
                     f"La hoja «{nombre}» no tiene los encabezados del Formulario 7 en la fila {FILA_ENCABEZADO} "
@@ -488,22 +430,19 @@ def _leer_libro(contenido, ctx, subjurisdiccion_secretaria, resultado):
                     f"oficial sin agregar ni borrar filas o columnas arriba de la tabla."))
                 continue
             if tipo == "comun":
-                _validar_encabezado(nombre, encabezado, subjurisdiccion_secretaria, resultado)
+                _datos_de_encabezado(encabezado, resultado)
             _leer_hoja(ws, tipo, ctx, resultado)
     finally:
         libro.close()
     return True
 
 
-def leer_formulario(contenido, *, nombre_archivo, categoria, catalogo, fuentes_categoria, fuentes_activas,
-                    anio_fiscal, subjurisdiccion_secretaria=None):
+def leer_formulario(contenido, *, categoria, catalogo, fuentes_categoria, fuentes_activas, anio_fiscal):
     """Lee y valida el Excel subido para `categoria`.
 
     catalogo: filas de catalogo_bienes (db.listar_catalogo).
     fuentes_categoria: fuentes en las que la Categoria tiene techo.
     fuentes_activas: fuentes habilitadas (FUENTES_HABILITADAS).
-    subjurisdiccion_secretaria: la que cargo el admin para la Secretaria, si
-    la cargo -- la de la planilla tiene que coincidir.
 
     Devuelve un dict con `items` (filas validas, cada una con su fuente),
     `errores` (todos, con hoja/celda), `totales_por_fuente` ({fuente:
@@ -519,14 +458,7 @@ def leer_formulario(contenido, *, nombre_archivo, categoria, catalogo, fuentes_c
     ctx = _Contexto(categoria=categoria, catalogo=catalogo, fuentes_categoria=fuentes_categoria,
                     fuentes_activas=fuentes_activas, anio_fiscal=anio_fiscal)
 
-    leido = _leer_libro(contenido, ctx, subjurisdiccion_secretaria, resultado)
-    # El nombre va primero en la lista: es lo primero que hay que corregir.
-    if resultado["subjurisdiccion"]:
-        subjurisdiccion, origen = resultado["subjurisdiccion"], f"la de la celda {CELDA_SUBJURISDICCION}"
-    else:
-        subjurisdiccion, origen = subjurisdiccion_secretaria, "la de tu Secretaría"
-    resultado["errores"][:0] = _validar_nombre(nombre_archivo, categoria, subjurisdiccion, origen)
-
+    leido = _leer_libro(contenido, ctx, resultado)
     if leido and resultado["filas_con_datos"] == 0:
         resultado["errores"].append(_error(None, None, None,
             f"El Excel no tiene ningún bien cargado (las hojas «{HOJA_COMUN}» y «{HOJA_ESPECIAL}» están vacías)."))
