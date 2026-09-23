@@ -284,19 +284,13 @@ class ExcelConErrores(BaseCarga):
         techo = [e for e in resp.get_json()["errores"] if e.get("tipo") == "techo"]
         self.assertEqual([(e["nivel"], e["disponible"], e["excedente"]) for e in techo], [("secretaria", 3000, 2000)])
 
-    def test_nombre_de_archivo_de_otra_categoria(self):
-        resp = self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)]), nombre="F7_1110111000_22.02.00.xlsx")
-        self.assertRechazado(resp)
-        self.assertIn("22.02.00", resp.get_json()["errores"][0]["mensaje"])
-
     def test_archivo_que_no_es_la_planilla(self):
         self.assertRechazado(self.subir(b"esto no es un excel"))
 
     def test_planilla_sin_las_hojas_del_formulario(self):
-        for hojas in (("Hoja1",), ("F7 especial",)):
-            resp = self.subir(armar_excel(especiales=[especial(110, "1", "X", "U", 1, 1)], hojas=hojas))
-            self.assertEqual(resp.status_code, 422)
-            self.assertIn("no tiene la hoja «F7 común»", resp.get_json()["errores"][0]["mensaje"])
+        resp = self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], hojas=("Hoja1",)))
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("no tiene las hojas", resp.get_json()["errores"][0]["mensaje"])
 
     def test_encabezados_corridos(self):
         resp = self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], encabezados=["x"] * 7))
@@ -310,41 +304,26 @@ class ExcelConErrores(BaseCarga):
 
 
 class RequisitosDelInstructivo(BaseCarga):
-    """Lo que pide el instructivo de la propia planilla (celda K2)."""
+    """Lo que pide el instructivo de la propia planilla, y lo que no se exige."""
 
     def errores(self, resp):
         self.assertEqual(resp.status_code, 422, resp.get_json())
         return resp.get_json()["errores"]
 
-    def test_celdas_pintadas_del_encabezado(self):
-        errores = self.errores(self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], sub=None, fecha=None,
-                                                      programa=None)))
-        por_celda = {e["celda"]: e for e in errores}
-        self.assertEqual(set(por_celda), {"C6", "G6", "A7"})
-        self.assertEqual(por_celda["C6"]["campo"], "Subjurisdicción")
-        self.assertIn("Programa o Actividades centrales", por_celda["A7"]["mensaje"])
-        self.assertTrue(all(e["hoja"] == "F7 común" for e in errores))
+    def test_no_son_errores_el_nombre_del_archivo_ni_el_encabezado(self):
+        # Cualquier nombre de archivo; Subjurisdiccion, Fecha y Programa vacios
+        # o distintos a los de la Secretaria: se carga igual.
+        for nombre, sub in (("01.41.00.xlsx", "1110200000"), ("formulario salud.xlsx", None),
+                            ("F7_otra_22.02.00.xlsx", "111-01")):
+            with self.subTest(nombre=nombre):
+                resp = self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], sub=sub, fecha=None, programa=None),
+                                  nombre=nombre)
+                self.assertEqual(resp.status_code, 201, resp.get_json())
 
-    def test_subjurisdiccion_de_10_digitos_y_de_la_secretaria(self):
-        errores = self.errores(self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], sub="111-01"),
-                                          nombre="F7_111-01_22.01.00.xlsx"))
-        self.assertIn("tiene que ser 1110111000 (la de tu Secretaría)", errores[0]["mensaje"])
-        self.assertIn("10 dígitos", errores[-1]["mensaje"])
-        # Salud tiene cargada 1110111000: otra subjurisdiccion en la planilla no va.
-        errores = self.errores(self.subir(armar_excel(comunes=[comun(110, "ARROZ", 1)], sub="1110101000"),
-                                          nombre="F7_1110101000_22.01.00.xlsx"))
-        self.assertEqual([e["celda"] for e in errores], ["C6"])
-        self.assertIn("tu Secretaría es 1110111000", errores[0]["mensaje"])
-
-    def test_nombre_del_archivo(self):
-        contenido = armar_excel(comunes=[comun(110, "ARROZ", 1)])
-        errores = self.errores(self.subir(contenido, nombre="formulario 7 salud.xlsx"))
-        self.assertEqual(len(errores), 1)
-        self.assertIn("renombralo como F7_1110111000_22.01.00.xlsx", errores[0]["mensaje"])
-        errores = self.errores(self.subir(contenido, nombre="F7_1110101000_22.01.00.xlsx"))
-        self.assertIn("tiene que ser 1110111000 (la de la celda C6)", errores[0]["mensaje"])
-        # La copia que Windows renombra al bajarla dos veces se acepta.
-        self.assertEqual(self.subir(contenido, nombre="F7_1110111000_22.01.00 (1).xlsx").status_code, 201)
+    def test_solo_hoja_especial_se_acepta(self):
+        resp = self.subir(armar_excel(especiales=[especial(110, "9.9.9.99999", "SERVICIO", "CADA UNO", 1, 10)],
+                                      hojas=("F7 especial",)))
+        self.assertEqual(resp.status_code, 201, resp.get_json())
 
     def test_especial_copiado_del_listado(self):
         errores = self.errores(self.subir(armar_excel(especiales=[
@@ -444,7 +423,7 @@ class Drive(BaseCarga):
             resp = self.subir(contenido)
             self.assertEqual(resp.status_code, 201, resp.get_json())
             self.assertTrue(resp.get_json()["drive"])
-            subir.assert_called_once_with("F7_1110111000_22.01.00.xlsx", contenido)
+            subir.assert_called_once_with("22.01.00.xlsx", contenido, "04 - Salud")
         carga = self.consultar("SELECT drive_file_id, drive_link FROM f7_carga_excel WHERE estado = 'aprobado'")[0]
         self.assertEqual(carga, {"drive_file_id": "abc", "drive_link": "https://drive.test/abc"})
 
@@ -469,7 +448,8 @@ class Drive(BaseCarga):
             subir_pendientes_a_drive.main()
         # Solo el ultimo aprobado de la categoria, con el nombre del instructivo.
         subir.assert_called_once()
-        self.assertEqual(subir.call_args.args[0], "F7_1110111000_22.01.00.xlsx")
+        self.assertEqual(subir.call_args.args[0], "22.01.00.xlsx")
+        self.assertEqual(subir.call_args.args[2], "04 - Salud")
         with db.conexion() as conn:
             self.assertEqual(db.aprobadas_sin_drive(conn, ANIO), [])
 
@@ -503,12 +483,13 @@ class SubidaADrive(unittest.TestCase):
 
     def test_manda_el_archivo_con_la_clave_y_devuelve_el_link(self):
         with self.responder('{"ok": true, "id": "abc", "url": "https://drive.test/abc"}'):
-            resultado = integrations.subir_a_drive("F7_1110111000_01.01.00.xlsx", b"datos")
+            resultado = integrations.subir_a_drive("01.01.00.xlsx", b"datos", "04 - Salud")
         self.assertEqual(resultado, {"id": "abc", "webViewLink": "https://drive.test/abc"})
         pedido = self.pedidos[0]
         self.assertEqual((pedido.full_url, pedido.get_method()), ("https://script.test/exec", "POST"))
         cuerpo = json.loads(pedido.data)
-        self.assertEqual((cuerpo["token"], cuerpo["nombre"]), ("clave", "F7_1110111000_01.01.00.xlsx"))
+        self.assertEqual((cuerpo["token"], cuerpo["nombre"], cuerpo["carpeta"]),
+                         ("clave", "01.01.00.xlsx", "04 - Salud"))
         self.assertEqual(base64.b64decode(cuerpo["contenido"]), b"datos")
 
     def test_errores_del_script_o_de_red_no_aprueban(self):
@@ -516,11 +497,11 @@ class SubidaADrive(unittest.TestCase):
                           urllib.error.URLError("sin red")):
             with self.subTest(respuesta=respuesta), self.responder(respuesta):
                 with self.assertRaises(integrations.IntegracionError):
-                    integrations.subir_a_drive("F7_1110111000_01.01.00.xlsx", b"datos")
+                    integrations.subir_a_drive("01.01.00.xlsx", b"datos", "04 - Salud")
 
     def test_sin_configurar_queda_en_el_servidor(self):
         with mock.patch.dict(os.environ, {"DRIVE_APPS_SCRIPT_URL": ""}):
-            self.assertIsNone(integrations.subir_a_drive("a.xlsx", b"1"))
+            self.assertIsNone(integrations.subir_a_drive("a.xlsx", b"1", "04 - Salud"))
 
 
 class Cors(unittest.TestCase):

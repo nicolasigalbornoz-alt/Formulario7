@@ -275,9 +275,8 @@ def cargar_excel_endpoint(usuario):
         catalogo = db.listar_catalogo(conn, ANIO_FISCAL)
 
     lectura = excel_import.leer_formulario(
-        contenido, nombre_archivo=nombre_archivo, categoria=categoria, catalogo=catalogo,
+        contenido, categoria=categoria, catalogo=catalogo,
         fuentes_categoria=set(cuotas), fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,
-        subjurisdiccion_secretaria=usuario.get("secretaria_subjurisdiccion"),
     )
     totales_por_fuente = dict(lectura["totales_por_fuente"])
     with db.conexion() as conn:
@@ -310,9 +309,11 @@ def cargar_excel_endpoint(usuario):
             "errores": errores, "totales": totales,
         }), 422
 
-    nombre_destino = f"{integrations.nombre_f7(subjurisdiccion, categoria)}.xlsx"
+    # En Drive: una carpeta por jurisdiccion, el archivo con el nombre de la categoria.
+    nombre_destino = integrations.nombre_archivo(categoria)
+    carpeta = integrations.nombre_carpeta(usuario.get("secretaria_jur"), usuario["secretaria_nombre"])
     try:
-        drive = integrations.subir_a_drive(nombre_destino, contenido)
+        drive = integrations.subir_a_drive(nombre_destino, contenido, carpeta)
     except integrations.IntegracionError as exc:
         log.error("Excel valido pero no se pudo guardar en Drive (secretaria=%s categoria=%s): %s",
                   secretaria_id, categoria, exc)

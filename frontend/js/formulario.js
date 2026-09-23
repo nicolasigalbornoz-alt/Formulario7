@@ -66,11 +66,9 @@
     const aviso = filas.some(f => f.submission_id)
       ? `<div class="alerta alerta-warn">Esta categoría ya tiene un Excel aprobado. Si subís otro, <strong>reemplaza al anterior</strong> entero.</div>`
       : "";
-    const nombreArchivo = `F7_${usuario.secretaria_subjurisdiccion || "<Subjurisdicción>"}_${selCategoria.value}.xlsx`;
     infoCategoria.innerHTML = `
       <p class="card-desc">Techo de la categoría ${escapeHtml(selCategoria.value)} -- sus filas solo pueden tener fuente ${fuentes}:</p>
-      <ul class="lista-techos">${techos}</ul>
-      <p class="card-desc">El archivo tiene que llamarse <strong>${escapeHtml(nombreArchivo)}</strong>.</p>${aviso}`;
+      <ul class="lista-techos">${techos}</ul>${aviso}`;
   }
 
   function renderResumenSecretaria() {
@@ -129,12 +127,10 @@
     btnSubir.disabled = !(selCategoria.value && inArchivo.files.length);
   }
 
-  function renderAprobado(r, categoria, nombre) {
-    const porFuente = r.totales.map(t => `fuente ${t.fuente}: ${formatoPesos(t.total)}`).join(" · ");
+  function renderAprobado(categoria) {
     resultado.innerHTML = `
       <div class="alerta alerta-ok">
-        <strong>Excel aprobado y cargado.</strong> Categoría ${escapeHtml(categoria)} (${escapeHtml(nombre)}):
-        ${r.items} ítem(s), total ${formatoPesos(r.total)} -- ${porFuente}.${r.drive ? " Quedó guardado en Drive." : ""}
+        <strong>El Formulario 7 de la categoría ${escapeHtml(categoria)} se cargó exitosamente.</strong>
       </div>`;
   }
 
@@ -190,7 +186,8 @@
     btnSubir.disabled = true;
     btnSubir.textContent = "Validando...";
     try {
-      renderAprobado(await Api.cargarExcel(categoria, archivo), categoria, archivo.name);
+      await Api.cargarExcel(categoria, archivo);
+      renderAprobado(categoria);
     } catch (err) {
       if (err.status === 422 && Array.isArray(err.payload.errores)) {
         renderRechazado(err.payload, archivo.name);

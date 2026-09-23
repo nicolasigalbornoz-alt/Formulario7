@@ -38,17 +38,18 @@ def main():
         if not ruta.is_file():
             print(f"  aviso: no esta la copia local de la carga id={carga['id']} ({carga['archivo_local']})")
             continue
-        # La copia local se llama <fecha>_F7_Subjurisdiccion_Categoria.xlsx
-        nombre = ruta.name.split("_", 1)[1]
+        # Igual que al aprobar: carpeta de la jurisdiccion, nombre de la categoria.
+        nombre = integrations.nombre_archivo(carga["categoria"])
+        carpeta = integrations.nombre_carpeta(carga["secretaria_jur"], carga["secretaria_nombre"])
         try:
-            drive = integrations.subir_a_drive(nombre, ruta.read_bytes())
+            drive = integrations.subir_a_drive(nombre, ruta.read_bytes(), carpeta)
         except integrations.IntegracionError as exc:
             print(f"  error subiendo {nombre}: {exc}")
             continue
         with db.conexion() as conn:
             db.marcar_en_drive(conn, carga["id"], drive["id"], drive.get("webViewLink"))
         subidos += 1
-        print(f"  {nombre} -> {drive.get('webViewLink')}")
+        print(f"  {carpeta}/{nombre} -> {drive.get('webViewLink')}")
 
     print(f"\n{subidos} de {len(pendientes)} archivo(s) subidos a Drive.")
 

@@ -7,14 +7,15 @@ categoría programática y el sistema lo revisa entero antes de aceptarlo.
 
 - Solo se carga si el Excel cumple lo que pide el instructivo de la propia
   planilla: denominaciones copiadas del Listado de bienes, **todas las
-  celdas pintadas completas** (cada fila con datos, y en "F7 común" la
-  Subjurisdicción, la Fecha y el Programa), cantidades enteras y el archivo
-  nombrado `F7_Subjurisdicción_Categoría.xlsx`. Los bienes de "F7 común"
-  usan el precio de Presupuesto y los de "F7 especial" el que pone el área.
+  celdas pintadas de cada fila completas** y cantidades enteras. Los bienes
+  de "F7 común" usan el precio de Presupuesto y los de "F7 especial" el que
+  pone el área. El archivo puede llamarse de cualquier manera, y el
+  encabezado (Subjurisdicción, Fecha, Programa) no se valida.
 - No puede pasarse del **techo presupuestario de la categoría ni del total
   de la Secretaría** (por fuente de financiamiento).
-- **Aprobado**: se guarda en la carpeta de Google Drive de Presupuesto (un
-  archivo por categoría, con ese nombre) y se registran sus ítems.
+- **Aprobado**: se guarda en la carpeta de Google Drive de Presupuesto, en
+  una subcarpeta por jurisdicción (`04 - Salud`) y con el nombre de la
+  categoría (`22.01.00.xlsx`), y se registran sus ítems.
 - **Rechazado**: no se carga nada. El área ve en la página cada error con
   su hoja y celda para corregirlo y volver a subirlo.
 - No se manda ningún mail. Las direcciones de Presupuesto
@@ -105,9 +106,7 @@ planillas y una base temporal; no necesitan los Excel de `data/`).
 - `GET /api/admin/reporte`: techo presupuestario/cargado/disponible por
   categoría y por Secretaría (por fuente), con export a CSV.
 - `PATCH /api/admin/secretarias/<id>`: el admin carga la Subjurisdicción
-  (código RAFAM fijo) de una Secretaría. Se usa para nombrar el Excel
-  aprobado (`F7_Subjurisdicción_Categoría`); si falta, se toma la celda C6
-  del propio Excel.
+  (código RAFAM fijo) de una Secretaría, como dato de referencia.
 
 Ver `db/README.md` para el detalle del esquema y `data/README.md` para el
 formato esperado de los Excel de origen.
@@ -192,8 +191,13 @@ Se configura una sola vez:
 5. Subir lo que se aprobó antes de configurar Drive:
    `python scripts/subir_pendientes_a_drive.py --anio 2027`.
 
-Cada categoría tiene un solo archivo: al aprobarse un Excel nuevo, el
-anterior va a la papelera de Drive (se recupera de ahí durante 30 días).
+Dentro de la carpeta, el script crea una subcarpeta por jurisdicción
+(`04 - Salud`) y guarda cada Excel aprobado con el nombre de su categoría
+(`22.01.00.xlsx`). Cada categoría tiene un solo archivo: al aprobarse un
+Excel nuevo, el anterior va a la papelera de Drive (se recupera de ahí
+durante 30 días). Si se cambia el código del script, hay que publicar una
+versión nueva (Implementar → Gestionar implementaciones → editar → Versión:
+nueva versión) para que la URL siga siendo la misma.
 Con `REQUIRE_DRIVE_UPLOAD=1` no se aprueba ninguna carga si Drive no está
 configurado o falla.
 

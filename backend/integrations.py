@@ -32,21 +32,28 @@ class IntegracionError(Exception):
     pass
 
 
-def nombre_f7(subjurisdiccion, categoria):
-    """El nombre que pide el instructivo de la planilla para el archivo:
-    F7_Subjurisdiccion_Categoria programatica."""
-    sub = re.sub(r"[^\w.-]", "", subjurisdiccion or "") or "SD"
-    return f"F7_{sub}_{re.sub(r'[^\w.-]', '', categoria)}"
+def nombre_archivo(categoria):
+    """El Excel aprobado se guarda con el nombre de su Categoria (ej.
+    01.41.00.xlsx), se llame como se llame el archivo que subio el area."""
+    return f"{re.sub(r'[^0-9A-Za-z.-]', '', categoria)}.xlsx"
+
+
+def nombre_carpeta(jur, secretaria):
+    """Una carpeta por jurisdiccion (Secretaria) dentro de la carpeta de
+    Drive: "04 - Salud"."""
+    nombre = re.sub(r"[\\/]", "-", secretaria).strip()
+    return f"{jur} - {nombre}" if jur else nombre
 
 
 def drive_configurado():
     return bool(os.environ.get("DRIVE_APPS_SCRIPT_URL") and os.environ.get("DRIVE_TOKEN"))
 
 
-def subir_a_drive(nombre, contenido):
-    """Guarda el Excel aprobado en la carpeta de Drive. Un archivo por
-    Categoria: el script manda a la papelera de Drive el anterior con el
-    mismo nombre (se puede recuperar de ahi durante 30 dias).
+def subir_a_drive(nombre, contenido, carpeta):
+    """Guarda el Excel aprobado en la subcarpeta `carpeta` (la de la
+    jurisdiccion; el script la crea si no existe) de la carpeta de Drive.
+    Un archivo por Categoria: el script manda a la papelera de Drive el
+    anterior con el mismo nombre (se puede recuperar durante 30 dias).
 
     Devuelve {"id", "webViewLink"}, o None si Drive no esta configurado (y
     no se exige). Si esta configurado y falla levanta IntegracionError: la
@@ -60,6 +67,7 @@ def subir_a_drive(nombre, contenido):
     cuerpo = json.dumps({
         "token": os.environ["DRIVE_TOKEN"],
         "nombre": nombre,
+        "carpeta": carpeta,
         "contenido": base64.b64encode(contenido).decode("ascii"),
     }).encode("utf-8")
     pedido = urllib.request.Request(
