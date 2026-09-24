@@ -478,6 +478,64 @@ def upsert_catalogo_bien(conn, *, codigo, denominacion, unidad_texto, unidad_num
     )
 
 
+def importar_catalogo(conn, contenido_excel, anio_fiscal):
+    """Importa la hoja "Listado de bienes" de un Excel con la misma
+    estructura de "formulario 7 2027.xlsx" directo desde bytes, para hosts
+    sin shell (Render) donde no se puede correr
+    scripts/build_catalogo_data.py a mano. Misma logica que ese script:
+    bienes sin precio se importan igual (solo cargables como "especial"),
+    codigo duplicado se queda con la primera fila (como el VLOOKUP del
+    Excel original), e idempotente por (codigo, anio_fiscal)."""
+    import io as _io
+    import openpyxl as _openpyxl
+
+    COL_DENOMINACION, COL_CODIGO, COL_UNIDAD_TEXTO, COL_UNIDAD_NUM, COL_PRECIO = 1, 2, 3, 4, 7
+    FILA_INICIO = 2
+
+    wb = _openpyxl.load_workbook(_io.BytesIO(contenido_excel), data_only=True)
+    if "Listado de bienes" not in wb.sheetnames:
+        raise DbError('El Excel no tiene una hoja "Listado de bienes".')
+    ws = wb["Listado de bienes"]
+
+    bienes = []
+    r = FILA_INICIO
+    while True:
+        denominacion = ws.cell(row=r, column=COL_DENOMINACION).value
+        if denominacion is None or str(denominacion).strip() == "":
+            break
+        codigo = ws.cell(row=r, column=COL_CODIGO).value
+        precio = ws.cell(row=r, column=COL_PRECIO).value
+        bienes.append({
+            "denominacion": str(denominacion).strip(),
+            "codigo": str(codigo).strip() if codigo is not None else None,
+            "unidad_texto": str(ws.cell(row=r, column=COL_UNIDAD_TEXTO).value or "").strip(),
+            "unidad_num": ws.cell(row=r, column=COL_UNIDAD_NUM).value,
+            "precio": round(float(precio), 2) if isinstance(precio, (int, float)) else None,
+        })
+        r += 1
+
+    marcar_catalogo_no_vigente(conn, anio_fiscal)
+
+    vistos = set()
+    duplicados = []
+    sin_precio = 0
+    for b in bienes:
+        if not b["codigo"]:
+            continue
+        if b["codigo"] in vistos:
+            duplicados.append(b["codigo"])
+            continue
+        vistos.add(b["codigo"])
+        if b["precio"] is None:
+            sin_precio += 1
+        upsert_catalogo_bien(
+            conn, codigo=b["codigo"], denominacion=b["denominacion"], unidad_texto=b["unidad_texto"],
+            unidad_num=b["unidad_num"], precio=b["precio"], anio_fiscal=anio_fiscal,
+        )
+
+    return {"total": len(vistos), "sin_precio": sin_precio, "duplicados": sorted(set(duplicados))}
+
+
 def listar_catalogo(conn, anio_fiscal):
     """Todo el "Listado de bienes" vigente del anio (~1500 filas), en el
     orden del Excel original -- excel_import lo indexa en memoria una vez

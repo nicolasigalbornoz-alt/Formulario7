@@ -568,6 +568,34 @@ def importar_techos_endpoint(usuario):
     return jsonify({"ok": True, **resumen}), 200
 
 
+@app.route("/api/admin/importar-catalogo", methods=["POST"])
+@auth.admin_required
+def importar_catalogo_endpoint(usuario):
+    """Sube el Excel del catalogo de bienes (misma estructura de
+    "formulario 7 2027.xlsx", hoja "Listado de bienes") y lo importa directo
+    a la base -- para hosts sin shell (Render) donde no se puede correr
+    scripts/build_catalogo_data.py a mano. Sin este catalogo cargado, todo
+    Excel de "F7 común" se rechaza (no hay con que verificar la
+    denominación ni el precio de Presupuesto de cada bien)."""
+    archivo = request.files.get("archivo")
+    if archivo is None or not archivo.filename:
+        return jsonify({"ok": False, "error": "Seleccioná el Excel del catálogo de bienes."}), 400
+    if not archivo.filename.lower().endswith(".xlsx"):
+        return jsonify({"ok": False, "error": "El archivo tiene que ser un Excel .xlsx."}), 400
+    contenido = archivo.read()
+    if not contenido:
+        return jsonify({"ok": False, "error": "El archivo está vacío."}), 400
+
+    try:
+        with db.conexion() as conn:
+            resumen = db.importar_catalogo(conn, contenido, ANIO_FISCAL)
+    except db.DbError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    log.info("Catálogo importado por admin=%s: %s", usuario["username"], resumen)
+    return jsonify({"ok": True, **resumen}), 200
+
+
 @app.route("/api/admin/seguimiento", methods=["GET"])
 @auth.admin_required
 def seguimiento_endpoint(usuario):

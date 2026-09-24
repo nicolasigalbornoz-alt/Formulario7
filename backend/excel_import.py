@@ -356,6 +356,16 @@ def _validar_fila(tipo, hoja, fila, celdas, ctx):
     return errores, item, (fuente, subtotal) if subtotal is not None else None
 
 
+def _clave_bien(item):
+    """Identidad de un bien para detectar filas repetidas (en cualquiera de
+    las dos hojas): el mismo bien del catalogo -- aunque el area lo haya
+    escrito distinto (mayusculas, con/sin tildes) -- o, si no figura en el
+    catalogo (especial cargado a mano), su denominacion normalizada."""
+    if item["catalogo_id"] is not None:
+        return ("catalogo", item["catalogo_id"])
+    return ("denominacion", _normalizar(item["denominacion"]))
+
+
 def _leer_hoja(ws, tipo, ctx, resultado):
     maximo = min(ws.max_row or (FILA_INICIO + MAX_FILAS), FILA_INICIO + MAX_FILAS)
     filas = ws.iter_rows(min_row=FILA_INICIO, max_row=maximo, max_col=len(LETRAS), values_only=True)
@@ -369,6 +379,17 @@ def _leer_hoja(ws, tipo, ctx, resultado):
         resultado["filas_con_datos"] += 1
 
         errores, item, parcial = _validar_fila(tipo, ws.title, fila, celdas, ctx)
+        if item is not None:
+            clave = _clave_bien(item)
+            primera = resultado["bienes_vistos"].get(clave)
+            if primera is not None:
+                hoja_previa, fila_previa = primera
+                errores = errores + [_error(ws.title, fila, "C",
+                    f"«{item['denominacion']}» ya está cargado en la fila {fila_previa} de «{hoja_previa}»: "
+                    f"sumá las cantidades en una sola fila, no lo repitas.")]
+                item = None
+            else:
+                resultado["bienes_vistos"][clave] = (ws.title, fila)
         resultado["errores"].extend(errores)
         if item is not None:
             resultado["items"].append(item)
@@ -454,6 +475,7 @@ def leer_formulario(contenido, *, categoria, catalogo, fuentes_categoria, fuente
         "subjurisdiccion": None,
         "programa": None,
         "filas_con_datos": 0,
+        "bienes_vistos": {},  # clave del bien (ver _clave_bien) -> (hoja, fila) de su primera aparicion
     }
     ctx = _Contexto(categoria=categoria, catalogo=catalogo, fuentes_categoria=fuentes_categoria,
                     fuentes_activas=fuentes_activas, anio_fiscal=anio_fiscal)
