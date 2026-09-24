@@ -87,6 +87,7 @@ def _preparar_base():
             db.asegurar_esquema(conn)
             db.habilitar_fuentes(conn, FUENTES_HABILITADAS)
             _sembrar_admin(conn)
+            _sembrar_admins_fijos(conn)
             _sembrar_areas(conn)
             _sembrar_catalogo_y_techos(conn)
     except db.DbError as exc:
@@ -104,6 +105,26 @@ def _sembrar_admin(conn):
         db.actualizar_usuario(conn, existente["id"], activo=True, password_hash=password_hash)
     elif not existente:
         db.crear_usuario(conn, username=username, password_hash=password_hash, rol="admin")
+
+
+# Admins fijos ademas del de ADMIN_USERNAME/ADMIN_PASSWORD (p. ej. creados a
+# mano desde el panel): igual que USUARIOS_AREA_FIJOS, sin esto se pierden
+# en cada reset de Render.
+ADMINS_FIJOS = {
+    "mayra": ("presupuesto2027", "Mayra Santillán"),
+    "tadeo": ("presupuesto2027", "Tadeo Bessega"),
+}
+
+
+def _sembrar_admins_fijos(conn):
+    for username, (password, nombre_completo) in ADMINS_FIJOS.items():
+        password_hash = auth.hashear_password(password)
+        existente = db.obtener_usuario_por_username(conn, username)
+        if existente and existente["rol"] == "admin":
+            db.actualizar_usuario(conn, existente["id"], activo=True, password_hash=password_hash)
+        elif not existente:
+            db.crear_usuario(conn, username=username, password_hash=password_hash, rol="admin",
+                              nombre_completo=nombre_completo)
 
 
 # Usuarios de area fijos: en un host sin disco persistente (Render Free)
