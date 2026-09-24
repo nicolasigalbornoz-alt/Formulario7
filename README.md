@@ -113,6 +113,44 @@ formato esperado de los Excel de origen.
 
 ## Deploy
 
+**Backend**: corriendo en **Render** (Web Service, plan Free), conectado a
+este repo -- cada push a `main` lo redeploya solo. URL:
+`https://formulario7.onrender.com`. `API_BASE` en `frontend/js/api.js`
+apunta ahí.
+
+⚠️ El plan Free de Render **no tiene disco persistente**: cada redeploy (o
+cada vez que el servicio se "duerme" por inactividad y despierta) borra
+`db/formulario7.db` entero -- se pierden los usuarios, los techos y los
+Formularios 7 ya cargados (los Excel aprobados sobreviven aparte, en Drive,
+si está configurado -- ver "Drive" abajo). Para que el servicio no arranque
+completamente vacío en cada reset:
+
+- **Admin**: variables de entorno `ADMIN_USERNAME` y `ADMIN_PASSWORD` en
+  Render (Settings → Environment) -- el backend crea (o reactiva y resetea
+  la contraseña de) ese admin solo al arrancar, sin necesitar shell
+  (`backend/app.py:_sembrar_admin`).
+- **Techos presupuestarios**: no hay shell en el plan Free para correr
+  `scripts/build_cuota_data.py`, así que se suben por API una vez logueado
+  como admin -- `POST /api/admin/importar-techos` (multipart, campo
+  `archivo` con el Excel de techos, mismo formato que `Libro2.xlsx`/hoja
+  "Techos"; opcional `fuentes` en el form, default `"110"`). Ejemplo:
+  ```bash
+  curl -X POST https://formulario7.onrender.com/api/admin/importar-techos \
+    -H "Authorization: Bearer $TOKEN" \
+    -F "archivo=@Libro2.xlsx"
+  ```
+- El **catálogo de bienes** (`formulario 7 2027.xlsx`) no tiene un endpoint
+  equivalente todavía -- hoy solo se importa localmente
+  (`scripts/build_catalogo_data.py`) contra un archivo de base con disco
+  persistente, o manualmente vía el Shell de un plan pago de Render.
+
+Para uso sostenido sin perder datos en cada sleep, migrar al plan Starter de
+Render (~USD 7/mes, con disco persistente) o mover a Postgres.
+
+Como red de respaldo, cada Excel aprobado queda en Drive y además en
+`cargas/` en el servidor (`FORMULARIO7_CARGAS_DIR`) -- esto último tampoco
+sobrevive un reset en el plan Free.
+
 **Frontend**: publicado en GitHub Pages (`.github/workflows/deploy-pages.yml`,
 se dispara solo con cada push a `main`) -- https://nicolasigalbornoz-alt.github.io/Formulario7/.
 Solo sirve archivos estáticos; llama a lo que diga `API_BASE` en
@@ -123,52 +161,6 @@ https://formulario7.moron-presupuesto.workers.dev/. Se subió a mano el
 contenido de `frontend/`, así que **no se actualiza solo**: después de cada
 cambio en la página hay que volver a subirlo. El backend acepta los dos
 orígenes (`FRONTEND_ORIGIN` con los dos, separados por coma).
-
-**Backend**: corriendo hoy dentro de un **GitHub Codespace** de este mismo
-repo (codespace `legendary-fishstick-jjx7q79v7497h7j5`), con el puerto 5190
-reenviado en modo público (`gh codespace ports visibility 5190:public`) --
-sin necesitar cuenta de hosting nueva, usa la cuenta de GitHub que ya existe
-para el repo. `API_BASE` en `frontend/js/api.js` apunta a la URL pública que
-da ese reenvío (`https://<nombre-del-codespace>-5190.app.github.dev`).
-
-Esto es un parche funcional, no un deploy "de manual": el codespace se
-autodetiene tras un rato de inactividad (`--idle-timeout`, hoy 4hs) y ahí se
-cae el backend hasta que alguien lo reinicie a mano (`gh codespace ssh` +
-volver a levantar `backend/app.py` + volver a poner el puerto en público --
-la IP pública cambia si se borra el codespace, pero **no** solo por
-detenerse y reiniciarse). A favor: a diferencia del plan gratis de Render,
-acá el disco **sí es persistente** entre reinicios -- la base con los
-Formularios 7 cargados no se pierde, salvo que se borre el codespace.
-Los minutos de cómputo de Codespaces no son ilimitados (cuota gratis
-mensual por cuenta de GitHub); para un uso sostenido en el tiempo conviene
-migrar a un hosting pensado para eso -- quedan los pasos con Render más
-abajo para cuando haga falta.
-
-<details>
-<summary>Alternativa: Render (requiere que alguien cree la cuenta)</summary>
-
-1. En [render.com](https://render.com) → New → Web Service → conectar este
-   repo de GitHub.
-2. Root Directory: (vacío/raíz). Build Command: `pip install -r requirements.txt`.
-   Start Command: `python backend/app.py`. Plan: Free o Starter (ver ⚠️).
-3. Variables de entorno: `SECRET_KEY` (Generate en el propio Render) y
-   `FRONTEND_ORIGIN=https://nicolasigalbornoz-alt.github.io`.
-4. Los datos de referencia (`Libro2.xlsx`, `formulario 7 2027.xlsx`) no
-   están en el repo (cifras reales, no se commitean) -- subirlos como
-   *Secret Files* de Render (Environment →
-   Secret Files) y correr, desde el Shell de Render, los mismos comandos de
-   "Levantar todo localmente" (pasos 3 a 5) apuntando `--archivo` a donde
-   Render deja los secret files (`/etc/secrets/...`).
-5. Actualizar `API_BASE` en `frontend/js/api.js` con la URL que dé Render.
-
-⚠️ El plan Free de Render **no tiene disco persistente**: cada redeploy (o
-cada vez que el servicio se "duerme" y despierta) borra `db/formulario7.db`
--- se pierden los Formularios 7 ya cargados. Para eso hace falta el plan
-Starter con disco (~USD 7/mes) o mover a Postgres.
-</details>
-
-Como red de respaldo en cualquiera de los dos casos, cada Excel aprobado
-queda en Drive y además en `cargas/` en el servidor (`FORMULARIO7_CARGAS_DIR`).
 
 ### Drive
 
@@ -186,8 +178,8 @@ Se configura una sola vez:
    como: **Yo**" y "Quién tiene acceso: **Cualquier usuario**". Autorizar
    el acceso a Drive cuando lo pida y copiar la URL (termina en `/exec`).
 4. En el backend, las variables `DRIVE_APPS_SCRIPT_URL` (esa URL) y
-   `DRIVE_TOKEN` (la misma clave), y reiniciarlo. En el Codespace conviene
-   cargarlas como secretos del Codespace (GitHub → Settings → Codespaces).
+   `DRIVE_TOKEN` (la misma clave), y reiniciarlo. En Render se cargan en
+   Settings → Environment, igual que las demás.
 5. Subir lo que se aprobó antes de configurar Drive:
    `python scripts/subir_pendientes_a_drive.py --anio 2027`.
 
@@ -209,4 +201,7 @@ configurado o falla.
 - Que un usuario de área pueda cambiar su propia contraseña (hoy solo el
   admin la resetea).
 - Selector de año fiscal (hoy `ANIO_FISCAL` es una constante en `backend/app.py`, 2027).
-- Deploy del backend en un hosting pensado para eso, no un Codespace (ver "Deploy" arriba).
+- Migrar a un plan de Render con disco persistente (o Postgres): en el plan
+  Free actual, cada sleep/redeploy borra la base entera (ver "Deploy" arriba).
+- Endpoint para importar el catálogo de bienes (`formulario 7 2027.xlsx`) sin
+  shell, igual que ya existe para los techos (`POST /api/admin/importar-techos`).

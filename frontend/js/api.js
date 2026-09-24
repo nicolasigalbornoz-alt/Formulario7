@@ -1,10 +1,11 @@
 // Unica linea a cambiar para apuntar al backend ya desplegado (ver README.md).
-// Backend corriendo en un GitHub Codespace (ver README.md, seccion "Deploy") --
-// se cae si el Codespace se detiene o pasa su limite de horas gratis.
+// Backend corriendo en Render (ver README.md, seccion "Deploy") -- plan
+// Free: sin disco persistente, la base se resetea en cada redeploy o
+// cuando el servicio se duerme y despierta.
 // Abriendo el frontend en localhost (desarrollo) se usa el backend local.
 const API_BASE = ["localhost", "127.0.0.1"].includes(window.location.hostname)
   ? "http://localhost:5190"
-  : "https://legendary-fishstick-jjx7q79v7497h7j5-5190.app.github.dev";
+  : "https://formulario7.onrender.com";
 
 const SOPORTE_EMAILS = ["dir.presupuesto@moron.gob.ar", "bessega.tadeo@moron.gob.ar"];
 const SOPORTE_TEXTO = `Si el problema persiste, escribí a ${SOPORTE_EMAILS.join(" o ")}.`;
