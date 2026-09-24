@@ -4,6 +4,12 @@ function formatoPesos(monto) {
   }).format(monto || 0);
 }
 
+function formatoTamano(bytes) {
+  if (!bytes) return "0 KB";
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${kb.toFixed(kb < 10 ? 1 : 0)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
 function formatoFecha(iso) {
   if (!iso) return "--";
   // Las fechas de la base vienen "YYYY-MM-DD HH:MM:SS" en UTC (es lo que
