@@ -1,0 +1,21 @@
+name: Mantener despierto el backend en Render
+
+# Render (plan Free) duerme el servicio despues de un rato sin trafico HTTP,
+# y al despertar arranca con la base vacia (sin disco persistente -- ver
+# README.md, seccion "Deploy"). Este ping periodico evita ESE dormir por
+# inactividad; NO evita el reset que igual pasa con cada redeploy (eso solo
+# se arregla con un plan con disco persistente).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pingear el backend
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 https://formulario7.onrender.com/api/sesion)
+          echo "Respuesta del backend: HTTP $code"
