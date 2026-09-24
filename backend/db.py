@@ -284,6 +284,79 @@ def upsert_cuota_categoria(conn, *, secretaria_id, categoria, fuente, anio_fisca
     )
 
 
+def importar_techos(conn, contenido_excel, anio_fiscal, fuentes=(110,)):
+    """Importa la hoja "Techos" de un Excel con la misma estructura de
+    Libro2.xlsx (Jur. | Secretaria | Categoria | Techo fuente 110 | Obras de
+    construccion | Estimacion fondo de 131) directo desde bytes, para hosts
+    sin shell (Render) donde no se puede correr scripts/build_cuota_data.py
+    a mano. `fuentes` filtra que fuentes se importan (default solo 110);
+    misma logica idempotente que el script: marca no vigente lo de esa
+    fuente/anio y el upsert que sigue vuelve a poner vigente=1 en lo que
+    aparece en el Excel."""
+    import io as _io
+    import openpyxl as _openpyxl
+
+    COL_JUR, COL_SECRETARIA, COL_CATEGORIA = 1, 2, 3
+    COL_TECHO_POR_FUENTE = {110: 4, 131: 6}
+    FILA_INICIO = 2
+
+    wb = _openpyxl.load_workbook(_io.BytesIO(contenido_excel), data_only=True)
+    if "Techos" not in wb.sheetnames:
+        raise DbError('El Excel no tiene una hoja "Techos".')
+    ws = wb["Techos"]
+
+    filas = []
+    r = FILA_INICIO
+    while True:
+        jur = ws.cell(row=r, column=COL_JUR).value
+        if jur is None or str(jur).strip() == "":
+            break
+        filas.append({
+            "jur": str(jur).strip(),
+            "secretaria": str(ws.cell(row=r, column=COL_SECRETARIA).value or "").strip(),
+            "categoria": str(ws.cell(row=r, column=COL_CATEGORIA).value or "").strip(),
+            "techo_por_fuente": {
+                fuente: round(float(ws.cell(row=r, column=col).value or 0), 2)
+                for fuente, col in COL_TECHO_POR_FUENTE.items()
+            },
+        })
+        r += 1
+
+    for fuente in fuentes:
+        marcar_cuota_no_vigente(conn, fuente, anio_fiscal)
+
+    secretarias_vistas = set()
+    total_por_secretaria = {fuente: {} for fuente in fuentes}
+    categorias_por_fuente = {fuente: 0 for fuente in fuentes}
+
+    for f in filas:
+        secretaria_id = resolver_secretaria(conn, f["secretaria"], jur=f["jur"])
+        secretarias_vistas.add(f["secretaria"])
+        for fuente in fuentes:
+            techo = f["techo_por_fuente"].get(fuente, 0)
+            if techo <= 0:
+                continue
+            total_por_secretaria[fuente][secretaria_id] = total_por_secretaria[fuente].get(secretaria_id, 0) + techo
+            categorias_por_fuente[fuente] += 1
+            upsert_cuota_categoria(
+                conn, secretaria_id=secretaria_id, categoria=f["categoria"], fuente=fuente,
+                anio_fiscal=anio_fiscal, suma_compromiso=None, porcentaje=None, techo=techo,
+            )
+
+    for fuente in fuentes:
+        for secretaria_id, monto_total in total_por_secretaria[fuente].items():
+            upsert_secretaria_cuota_total(
+                conn, secretaria_id=secretaria_id, fuente=fuente, anio_fiscal=anio_fiscal,
+                monto_total=round(monto_total, 2),
+            )
+
+    return {
+        "secretarias": len(secretarias_vistas),
+        "categorias_por_fuente": categorias_por_fuente,
+        "totales_por_fuente": {f: len(total_por_secretaria[f]) for f in fuentes},
+    }
+
+
 def actualizar_techo_categoria(conn, cuota_categoria_id, techo):
     """Edicion manual del techo por el admin -- por fuera del reimport
     desde Libro1.xlsx, para correcciones puntuales sin tener que tocar el
