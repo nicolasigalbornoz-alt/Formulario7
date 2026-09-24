@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Formulario 7 -- Carga</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -24,18 +27,30 @@
     </ul>
   </div>
 
-  <div class="card">
-    <h2>Subir el Excel de una categoría</h2>
-    <div class="grid-2">
-      <div class="campo">
-        <label for="sel-categoria">Categoría programática</label>
-        <select id="sel-categoria"></select>
+  <div class="card card-carga">
+    <div class="card-head">
+      <div class="card-head-icono">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
       </div>
-      <div class="campo">
-        <label for="in-archivo">Excel del Formulario 7 (.xlsx)</label>
-        <input type="file" id="in-archivo" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <div>
+        <h2>Subir el Excel de una categoría</h2>
+        <p class="card-desc">Elegí la categoría y arrastrá el archivo, o hacé clic para buscarlo.</p>
       </div>
     </div>
+
+    <div class="campo">
+      <label for="sel-categoria">Categoría programática</label>
+      <select id="sel-categoria"></select>
+    </div>
+
+    <div class="campo">
+      <label for="in-archivo">Excel del Formulario 7 (.xlsx)</label>
+      <label class="dropzone" for="in-archivo" id="dropzone">
+        <input type="file" id="in-archivo" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <div id="dropzone-contenido"></div>
+      </label>
+    </div>
+
     <div id="info-categoria"></div>
     <div class="acciones">
       <button type="button" class="btn btn-primary" id="btn-subir" disabled>Validar y cargar</button>

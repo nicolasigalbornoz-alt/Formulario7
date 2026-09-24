@@ -15,6 +15,59 @@
   const resultado = document.getElementById("resultado");
   const resumenSecretaria = document.getElementById("resumen-secretaria");
   const tbodyMisCargas = document.getElementById("tbody-mis-cargas");
+  const dropzone = document.getElementById("dropzone");
+  const dropzoneContenido = document.getElementById("dropzone-contenido");
+
+  const ICONO_SUBIR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>`;
+  const ICONO_ARCHIVO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/></svg>`;
+  const ICONO_QUITAR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>`;
+
+  function renderDropzone() {
+    const archivo = inArchivo.files[0];
+    if (!archivo) {
+      dropzoneContenido.innerHTML = `
+        <div class="dropzone-prompt">
+          <div class="dropzone-icono">${ICONO_SUBIR}</div>
+          <div class="dropzone-texto">
+            <strong>Arrastrá el Excel acá</strong>
+            <span class="dato-chico">o hacé clic para elegirlo -- hasta ${MAX_MB}&nbsp;MB</span>
+          </div>
+        </div>`;
+      return;
+    }
+    dropzoneContenido.innerHTML = `
+      <div class="dropzone-archivo">
+        <div class="dropzone-archivo-icono">${ICONO_ARCHIVO}</div>
+        <div class="dropzone-archivo-info">
+          <strong>${escapeHtml(archivo.name)}</strong>
+          <span class="dato-chico">${formatoTamano(archivo.size)}</span>
+        </div>
+        <button type="button" class="dropzone-quitar" id="dropzone-quitar" title="Quitar archivo" aria-label="Quitar archivo">${ICONO_QUITAR}</button>
+      </div>`;
+    document.getElementById("dropzone-quitar").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      inArchivo.value = "";
+      actualizarBoton();
+    });
+  }
+
+  ["dragenter", "dragover"].forEach(evento => dropzone.addEventListener(evento, (e) => {
+    e.preventDefault();
+    dropzone.classList.add("arrastrando");
+  }));
+  ["dragleave", "dragend"].forEach(evento => dropzone.addEventListener(evento, (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("arrastrando");
+  }));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("arrastrando");
+    if (e.dataTransfer.files.length) {
+      inArchivo.files = e.dataTransfer.files;
+      inArchivo.dispatchEvent(new Event("change"));
+    }
+  });
 
   // {categoria: [filas, una por fuente]}, en el orden en que vienen.
   function porCategoria() {
@@ -125,6 +178,7 @@
 
   function actualizarBoton() {
     btnSubir.disabled = !(selCategoria.value && inArchivo.files.length);
+    renderDropzone();
   }
 
   function renderAprobado(categoria) {
