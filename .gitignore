@@ -17,3 +17,7 @@ cargas/
 .DS_Store
 *.log
 .claude/scheduled_tasks.lock
+
+# Cloudflare Workers Builds (wrangler.toml) necesita package.json
+node_modules/
+.wrangler/
