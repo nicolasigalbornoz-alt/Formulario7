@@ -156,11 +156,13 @@ se dispara solo con cada push a `main`) -- https://nicolasigalbornoz-alt.github.
 Solo sirve archivos estáticos; llama a lo que diga `API_BASE` en
 `frontend/js/api.js`.
 
-También está publicado en Cloudflare (Worker de solo archivos estáticos):
-https://formulario7.moron-presupuesto.workers.dev/. Se subió a mano el
-contenido de `frontend/`, así que **no se actualiza solo**: después de cada
-cambio en la página hay que volver a subirlo. El backend acepta los dos
-orígenes (`FRONTEND_ORIGIN` con los dos, separados por coma).
+También está publicado en Cloudflare (Worker de solo archivos estáticos,
+`wrangler.toml`, sirve `frontend/` vía Workers Static Assets):
+https://formulario7.moron-presupuesto.workers.dev/. Con "Workers Builds"
+conectado al repo en el dashboard de Cloudflare, se actualiza solo en cada
+push (antes había que subir el contenido de `frontend/` a mano -- sin
+`wrangler.toml` esa build no tenía forma de saber qué desplegar). El backend
+acepta los dos orígenes (`FRONTEND_ORIGIN` con los dos, separados por coma).
 
 ### Drive
 
