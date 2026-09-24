@@ -71,16 +71,17 @@ def _preparar_base():
     sin shell, como Render), lo que le falte a una base hecha con una
     version anterior de db/schema.sql (p. ej. la tabla `sesion` del login
     por token, sin la cual el login falla), deja habilitadas solo
-    FUENTES_HABILITADAS y, si vienen ADMIN_USERNAME/ADMIN_PASSWORD, crea o
-    reactiva ese admin -- necesario en un host sin disco persistente, donde
-    cada reinicio arranca con la base vacia y nadie puede loguearse para
-    crear el primero a mano."""
+    FUENTES_HABILITADAS y, si vienen ADMIN_USERNAME/ADMIN_PASSWORD y/o
+    SEED_USUARIOS_AREA, crea o reactiva esos usuarios -- necesario en un
+    host sin disco persistente, donde cada reinicio arranca con la base
+    vacia y nadie puede loguearse para crearlos a mano."""
     db.asegurar_archivo()
     try:
         with db.conexion() as conn:
             db.asegurar_esquema(conn)
             db.habilitar_fuentes(conn, FUENTES_HABILITADAS)
             _sembrar_admin(conn)
+            _sembrar_areas(conn)
     except db.DbError as exc:
         log.warning("No se pudo preparar la base: %s", exc)
 
@@ -96,6 +97,42 @@ def _sembrar_admin(conn):
         db.actualizar_usuario(conn, existente["id"], activo=True, password_hash=password_hash)
     elif not existente:
         db.crear_usuario(conn, username=username, password_hash=password_hash, rol="admin")
+
+
+# Usuarios de area fijos: en un host sin disco persistente (Render Free)
+# es lo unico que evita que una Secretaria se quede sin poder loguear
+# despues de cada reset -- _sembrar_areas los recrea solos en cada arranque.
+USUARIOS_AREA_FIJOS = {
+    "HCD": ("hcd", "zZsjBBhdSP"),
+    "Economía y Finanzas": ("economia_finanzas", "9qc7wg9XrE"),
+    "Salud": ("salud", "gvzrMSEEvs"),
+    "Obras y Serv. Púb.": ("obras_serv_pub", "nPXnpXSU2o"),
+    "Control Comunal": ("control_comunal", "w3UP9kQeiq"),
+    "Educación y Des. De la Com.": ("educacion", "L3eZ2SA8Sy"),
+    "Legal y Técnica": ("legal_tecnica", "DAxfEjxTmH"),
+    "Planificación Estratégica": ("planificacion_estrategica", "sVd3Svunrs"),
+    "Mujeres, GyD": ("mujeres_gyd", "uakP44v2XX"),
+    "Jefatura de Gabinete": ("jefatura_gabinete", "dgB54ki7So"),
+    "Seguridad Ciudadana": ("seguridad_ciudadana", "BKL3YNfkx4"),
+    "Desarrollo Local, Empleo y E.S.": ("desarrollo_local", "iEhY3pYsZi"),
+    "Desarrollo Productivo": ("desarrollo_productivo", "4iSZbJzgin"),
+    "Tránsito y Transporte": ("transito_transporte", "4xqEM7JDk7"),
+}
+
+
+def _sembrar_areas(conn):
+    """Igual que _sembrar_admin, para USUARIOS_AREA_FIJOS. La Secretaria se
+    resuelve por nombre (se crea si todavia no existe; importar-techos la
+    completa despues con su jur)."""
+    for nombre_secretaria, (username, password) in USUARIOS_AREA_FIJOS.items():
+        secretaria_id = db.resolver_secretaria(conn, nombre_secretaria)
+        password_hash = auth.hashear_password(password)
+        existente = db.obtener_usuario_por_username(conn, username)
+        if existente and existente["rol"] == "area":
+            db.actualizar_usuario(conn, existente["id"], activo=True, password_hash=password_hash)
+        elif not existente:
+            db.crear_usuario(conn, username=username, password_hash=password_hash,
+                              rol="area", secretaria_id=secretaria_id)
 
 
 _preparar_base()
