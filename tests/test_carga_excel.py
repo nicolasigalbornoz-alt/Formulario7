@@ -506,7 +506,7 @@ class SubidaADrive(unittest.TestCase):
 
 class Cors(unittest.TestCase):
     def test_acepta_cada_origen_configurado_y_ninguno_mas(self):
-        origenes = ("https://nicolasigalbornoz-alt.github.io", "https://formulario7.moron-suministros.workers.dev")
+        origenes = ("https://nicolasigalbornoz-alt.github.io", "https://formulario7.moron-presupuesto.workers.dev")
         cliente = app_module.app.test_client()
         with mock.patch.object(app_module, "FRONTEND_ORIGINS", origenes):
             for origen in origenes:

@@ -32,6 +32,17 @@ def _db_path():
     return Path(os.environ.get("FORMULARIO7_DB_PATH", DB_PATH_DEFECTO))
 
 
+def asegurar_archivo():
+    """Crea el archivo de la base (vacio) y su carpeta si todavia no existen
+    -- para que el primer arranque en un host sin acceso a shell (Render,
+    etc.) no dependa de correr sqlite3 a mano. conexion() sigue exigiendo
+    que el archivo ya exista; este es el unico lugar que lo crea."""
+    path = _db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        sqlite3.connect(path).close()
+
+
 @contextmanager
 def conexion():
     path = _db_path()

@@ -15,11 +15,14 @@ Variables de entorno:
     PORT              puerto (default 5190)
     SECRET_KEY        no se usa para la sesion (ver auth.py), pero Flask la pide igual; cualquier valor sirve
     FRONTEND_ORIGIN   origenes exactos permitidos por CORS, separados por coma (default http://localhost:8890;
-                      p. ej. "https://nicolasigalbornoz-alt.github.io,https://formulario7.moron-suministros.workers.dev")
+                      p. ej. "https://nicolasigalbornoz-alt.github.io,https://formulario7.moron-presupuesto.workers.dev")
     FORMULARIO7_DB_PATH    ubicacion de la base SQLite (default db/formulario7.db)
     FORMULARIO7_CARGAS_DIR donde se guarda una copia de cada Excel aprobado (default cargas/)
     FUENTES_HABILITADAS    fuentes de financiamiento que se muestran y se aceptan en el Excel,
                            separadas por coma (default 110 -- la 131 queda oculta; "110,131" la vuelve a mostrar)
+    ADMIN_USERNAME, ADMIN_PASSWORD  si vienen las dos, crea (o reactiva y resetea la contraseña de)
+                           ese admin al arrancar -- para hosts sin shell (Render) donde no se puede
+                           correr scripts/seed_admin.py a mano
     Drive: ver el docstring de integrations.py (DRIVE_APPS_SCRIPT_URL, DRIVE_TOKEN, REQUIRE_DRIVE_UPLOAD)
 """
 import hashlib
@@ -64,15 +67,35 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_MB_EXCEL * 1024 * 1024
 
 
 def _preparar_base():
-    """Al arrancar: crea lo que le falte a una base hecha con una version
-    anterior de db/schema.sql (p. ej. la tabla `sesion` del login por token,
-    sin la cual el login falla) y deja habilitadas solo FUENTES_HABILITADAS."""
+    """Al arrancar: crea el archivo de la base si todavia no existe (hosts
+    sin shell, como Render), lo que le falte a una base hecha con una
+    version anterior de db/schema.sql (p. ej. la tabla `sesion` del login
+    por token, sin la cual el login falla), deja habilitadas solo
+    FUENTES_HABILITADAS y, si vienen ADMIN_USERNAME/ADMIN_PASSWORD, crea o
+    reactiva ese admin -- necesario en un host sin disco persistente, donde
+    cada reinicio arranca con la base vacia y nadie puede loguearse para
+    crear el primero a mano."""
+    db.asegurar_archivo()
     try:
         with db.conexion() as conn:
             db.asegurar_esquema(conn)
             db.habilitar_fuentes(conn, FUENTES_HABILITADAS)
+            _sembrar_admin(conn)
     except db.DbError as exc:
         log.warning("No se pudo preparar la base: %s", exc)
+
+
+def _sembrar_admin(conn):
+    username = os.environ.get("ADMIN_USERNAME")
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not username or not password:
+        return
+    password_hash = auth.hashear_password(password)
+    existente = db.obtener_usuario_por_username(conn, username)
+    if existente and existente["rol"] == "admin":
+        db.actualizar_usuario(conn, existente["id"], activo=True, password_hash=password_hash)
+    elif not existente:
+        db.crear_usuario(conn, username=username, password_hash=password_hash, rol="admin")
 
 
 _preparar_base()
