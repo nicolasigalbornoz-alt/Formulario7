@@ -1,6 +1,10 @@
 function formatoPesos(monto) {
+  // Decimales solo si hacen falta (minimumFractionDigits: 0): un techo real
+  // puede tener centavos (viene de Libro2.xlsx) y el backend los muestra en
+  // sus mensajes de error -- redondear siempre a entero acá mostraba un
+  // techo distinto del que usa la validación.
   return new Intl.NumberFormat("es-AR", {
-    style: "currency", currency: "ARS", maximumFractionDigits: 0,
+    style: "currency", currency: "ARS", minimumFractionDigits: 0, maximumFractionDigits: 2,
   }).format(monto || 0);
 }
 
