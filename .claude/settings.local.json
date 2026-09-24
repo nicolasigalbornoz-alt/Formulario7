@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp data/*.xlsx backend/seed/*)",
+      "Bash(mkdir -p backend/seed)",
+      "Bash(git add backend/seed/*)",
+      "Bash(git commit -m *)",
+      "Bash(git push *)"
+    ]
+  }
+}

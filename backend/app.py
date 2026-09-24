@@ -23,12 +23,18 @@ Variables de entorno:
     ADMIN_USERNAME, ADMIN_PASSWORD  si vienen las dos, crea (o reactiva y resetea la contraseña de)
                            ese admin al arrancar -- para hosts sin shell (Render) donde no se puede
                            correr scripts/seed_admin.py a mano
+    CATALOGO_XLSX_URL, TECHOS_XLSX_URL  link de Drive ("cualquiera con el enlace") al Excel del
+                           catálogo de bienes ("Listado de bienes") y al de techos presupuestarios
+                           ("Techos", formato Libro2.xlsx) -- si la tabla correspondiente esta vacia
+                           al arrancar, se descargan e importan solos (mismo motivo que ADMIN_USERNAME:
+                           Render sin disco persistente borra la base en cada reset)
     Drive: ver el docstring de integrations.py (DRIVE_APPS_SCRIPT_URL, DRIVE_TOKEN, REQUIRE_DRIVE_UPLOAD)
 """
 import hashlib
 import logging
 import os
 import sys
+import urllib.request
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
@@ -82,6 +88,7 @@ def _preparar_base():
             db.habilitar_fuentes(conn, FUENTES_HABILITADAS)
             _sembrar_admin(conn)
             _sembrar_areas(conn)
+            _sembrar_catalogo_y_techos(conn)
     except db.DbError as exc:
         log.warning("No se pudo preparar la base: %s", exc)
 
@@ -133,6 +140,61 @@ def _sembrar_areas(conn):
         elif not existente:
             db.crear_usuario(conn, username=username, password_hash=password_hash,
                               rol="area", secretaria_id=secretaria_id)
+
+
+def _url_descarga_drive(valor):
+    """Acepta un link de Drive en cualquier formato habitual (.../file/d/ID/view,
+    .../open?id=ID, .../uc?export=download&id=ID) o directamente el ID del
+    archivo, y devuelve la URL de descarga directa del contenido."""
+    valor = valor.strip()
+    if "/file/d/" in valor:
+        file_id = valor.split("/file/d/", 1)[1].split("/", 1)[0]
+    elif "id=" in valor:
+        file_id = valor.split("id=", 1)[1].split("&", 1)[0]
+    elif valor.startswith("http"):
+        return valor
+    else:
+        file_id = valor
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+
+def _descargar_excel_drive(url_o_id, timeout=20):
+    req = urllib.request.Request(_url_descarga_drive(url_o_id), headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _sembrar_catalogo_y_techos(conn):
+    """Igual idea que _sembrar_admin/_sembrar_areas: en Render (sin disco
+    persistente) el catalogo de bienes y los techos presupuestarios tambien
+    se pierden en cada reset. Si CATALOGO_XLSX_URL/TECHOS_XLSX_URL apuntan a
+    un Excel de Drive compartido y la tabla correspondiente esta vacia, se
+    descargan e importan solos. Nunca bloquea el arranque: un fallo de red
+    o un Excel invalido solo se registra en el log."""
+    catalogo_url = os.environ.get("CATALOGO_XLSX_URL")
+    if catalogo_url:
+        hay_catalogo = conn.execute(
+            "SELECT 1 FROM catalogo_bienes WHERE anio_fiscal = ? AND vigente = 1 LIMIT 1", (ANIO_FISCAL,)
+        ).fetchone()
+        if not hay_catalogo:
+            try:
+                resumen = db.importar_catalogo(conn, _descargar_excel_drive(catalogo_url), ANIO_FISCAL)
+                log.info("Catálogo auto-restaurado desde CATALOGO_XLSX_URL: %s", resumen)
+            except Exception as exc:
+                log.warning("No se pudo auto-restaurar el catálogo desde CATALOGO_XLSX_URL: %s", exc)
+
+    techos_url = os.environ.get("TECHOS_XLSX_URL")
+    if techos_url:
+        hay_techos = conn.execute(
+            "SELECT 1 FROM cuota_categoria WHERE anio_fiscal = ? AND vigente = 1 LIMIT 1", (ANIO_FISCAL,)
+        ).fetchone()
+        if not hay_techos:
+            try:
+                resumen = db.importar_techos(conn, _descargar_excel_drive(techos_url), ANIO_FISCAL,
+                                              fuentes=FUENTES_HABILITADAS)
+                log.info("Techos auto-restaurados desde TECHOS_XLSX_URL: %s", resumen)
+            except Exception as exc:
+                log.warning("No se pudo auto-restaurar los techos desde TECHOS_XLSX_URL: %s", exc)
 
 
 _preparar_base()
