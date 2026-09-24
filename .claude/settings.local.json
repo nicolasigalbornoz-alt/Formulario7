@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp data/*.xlsx backend/seed/*)",
+      "Bash(mkdir -p backend/seed)"
+    ]
+  }
+}
