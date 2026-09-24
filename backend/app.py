@@ -537,6 +537,37 @@ def actualizar_monto_total_endpoint(usuario, secretaria_cuota_total_id):
     return jsonify({"ok": True, "monto_total": monto_total}), 200
 
 
+@app.route("/api/admin/importar-techos", methods=["POST"])
+@auth.admin_required
+def importar_techos_endpoint(usuario):
+    """Sube el Excel de techos presupuestarios (misma estructura de
+    Libro2.xlsx, hoja "Techos") y lo importa directo a la base -- para hosts
+    sin shell (Render) donde no se puede correr scripts/build_cuota_data.py
+    a mano. Por default importa solo la fuente 110 (la unica habilitada);
+    mandar "fuentes":"110,131" en el form para traer tambien la 131."""
+    archivo = request.files.get("archivo")
+    if archivo is None or not archivo.filename:
+        return jsonify({"ok": False, "error": "Seleccioná el Excel de techos presupuestarios."}), 400
+    if not archivo.filename.lower().endswith(".xlsx"):
+        return jsonify({"ok": False, "error": "El archivo tiene que ser un Excel .xlsx."}), 400
+    contenido = archivo.read()
+    if not contenido:
+        return jsonify({"ok": False, "error": "El archivo está vacío."}), 400
+
+    fuentes = tuple(
+        int(f) for f in (request.form.get("fuentes") or "110").split(",") if f.strip()
+    )
+
+    try:
+        with db.conexion() as conn:
+            resumen = db.importar_techos(conn, contenido, ANIO_FISCAL, fuentes=fuentes)
+    except db.DbError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    log.info("Techos importados por admin=%s: %s", usuario["username"], resumen)
+    return jsonify({"ok": True, **resumen}), 200
+
+
 @app.route("/api/admin/seguimiento", methods=["GET"])
 @auth.admin_required
 def seguimiento_endpoint(usuario):
