@@ -17,5 +17,15 @@ jobs:
     steps:
       - name: Pingear el backend
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 https://formulario7.onrender.com/api/sesion)
-          echo "Respuesta del backend: HTTP $code"
+          # Si Render estaba dormido, despertar puede tardar mas que
+          # --max-time y curl corta con timeout (exit distinto de 0) --
+          # sin el "|| true" al final, eso hacia fallar el job entero y
+          # mandaba un mail de error por cada ping que encontraba el
+          # backend dormido, que es exactamente el caso que este workflow
+          # existe para cubrir.
+          if code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 50 https://formulario7.onrender.com/api/sesion); then
+            echo "Respuesta del backend: HTTP $code"
+          else
+            echo "El backend no respondio a tiempo (estaba dormido, probablemente ya despertando)."
+          fi
+          true
