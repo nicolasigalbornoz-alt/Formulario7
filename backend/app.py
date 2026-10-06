@@ -165,11 +165,15 @@ def _sembrar_areas(conn):
 
 def _url_descarga_drive(valor):
     """Acepta un link de Drive en cualquier formato habitual (.../file/d/ID/view,
+    .../spreadsheets/d/ID/edit -- este ultimo cuando Drive convierte el .xlsx
+    subido a Google Sheets nativo en vez de guardarlo como archivo binario --,
     .../open?id=ID, .../uc?export=download&id=ID) o directamente el ID del
     archivo, y devuelve la URL de descarga directa del contenido."""
     valor = valor.strip()
     if "/file/d/" in valor:
         file_id = valor.split("/file/d/", 1)[1].split("/", 1)[0]
+    elif "/spreadsheets/d/" in valor:
+        file_id = valor.split("/spreadsheets/d/", 1)[1].split("/", 1)[0]
     elif "id=" in valor:
         file_id = valor.split("id=", 1)[1].split("&", 1)[0]
     elif valor.startswith("http"):
