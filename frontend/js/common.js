@@ -93,9 +93,12 @@ function montarHeader(usuario, paginaActiva) {
     : `${usuario.secretaria_nombre} -- ${usuario.nombre_completo || usuario.username}`;
 
   topbar.innerHTML = `
-    <div>
-      <h1>Formulario 7 -- Presupuesto 2027</h1>
-      <div class="subtitulo">Municipalidad de Morón</div>
+    <div class="topbar-brand">
+      <img src="img/logo-moron.png" alt="Municipio de Morón">
+      <div>
+        <h1>Formulario 7 -- Presupuesto 2027</h1>
+        <div class="subtitulo">Municipalidad de Morón</div>
+      </div>
     </div>
     <nav class="topbar-nav">${nav}</nav>
     <div class="topbar-usuario">

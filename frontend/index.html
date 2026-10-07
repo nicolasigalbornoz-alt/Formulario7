@@ -4,31 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Formulario 7 -- Ingreso</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="icon" href="img/favicon-moron.png">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
-<div class="login-wrap">
-  <div class="card login-card">
-    <h1>Formulario 7</h1>
-    <p class="card-desc">Programación Anual de Compras de Bienes y Contrataciones de Servicios -- Municipalidad de Morón</p>
+<div class="login-layout">
+  <div class="login-brand-panel">
+    <div class="login-logo"><img src="img/logo-moron.png" alt="Municipio de Morón"></div>
+    <div>
+      <h1>Formulario 7</h1>
+      <p>Programación Anual de Compras de Bienes y Contrataciones de Servicios</p>
+    </div>
+    <div class="login-photo-caption">Plaza Alte. Brown -- Morón</div>
+  </div>
 
-    <div id="alerta"></div>
+  <div class="login-form-panel">
+    <div class="card login-card">
+      <h1>Ingresar</h1>
+      <p class="card-desc">Presupuesto 2027 -- Municipalidad de Morón</p>
 
-    <form id="form-login">
-      <div class="campo">
-        <label for="username">Usuario</label>
-        <input type="text" id="username" name="username" autocomplete="username" required>
-      </div>
-      <div class="campo">
-        <label for="password">Contraseña</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required>
-      </div>
-      <button type="submit" class="btn btn-primary" id="btn-entrar" style="width:100%; justify-content:center;">Ingresar</button>
-    </form>
+      <div id="alerta"></div>
+
+      <form id="form-login">
+        <div class="campo">
+          <label for="username">Usuario</label>
+          <input type="text" id="username" name="username" autocomplete="username" required>
+        </div>
+        <div class="campo">
+          <label for="password">Contraseña</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" id="btn-entrar" style="width:100%; justify-content:center;">Ingresar</button>
+      </form>
+    </div>
   </div>
 </div>
 
