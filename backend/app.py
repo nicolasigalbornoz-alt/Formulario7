@@ -34,6 +34,7 @@ import hashlib
 import logging
 import os
 import sys
+import threading
 import urllib.request
 from collections import defaultdict
 from datetime import datetime
@@ -189,6 +190,35 @@ def _descargar_excel_drive(url_o_id, timeout=20):
         return resp.read()
 
 
+def _descargar_excel_drive_con_limite(url_o_id, timeout=20):
+    """Igual que _descargar_excel_drive, pero con un limite de tiempo real
+    (wall-clock) que no depende de que urlopen lo respete: el timeout que
+    recibe urlopen solo cubre la lectura del socket una vez conectado, NO
+    la resolucion DNS previa -- un DNS colgado deja el hilo principal
+    esperando sin limite, y como esto corre al arrancar (import de este
+    modulo, antes de que Flask escuche ningun puerto), un cuelgue asi tira
+    abajo el deploy entero (Render lo mata por "Port scan timeout" a los
+    varios minutos). Correrlo en un hilo aparte con join(timeout) acota el
+    arranque pase lo que pase adentro; si se cuelga, el hilo queda huerfano
+    pero el proceso principal sigue."""
+    resultado = {}
+
+    def _trabajo():
+        try:
+            resultado["contenido"] = _descargar_excel_drive(url_o_id, timeout=timeout)
+        except Exception as exc:
+            resultado["error"] = exc
+
+    hilo = threading.Thread(target=_trabajo, daemon=True)
+    hilo.start()
+    hilo.join(timeout=timeout + 10)
+    if hilo.is_alive():
+        raise TimeoutError(f"La descarga no respondio en {timeout + 10}s (posible cuelgue de DNS/red)")
+    if "error" in resultado:
+        raise resultado["error"]
+    return resultado["contenido"]
+
+
 def _sembrar_catalogo_y_techos(conn):
     """Igual idea que _sembrar_admin/_sembrar_areas: en Render (sin disco
     persistente) el catalogo de bienes y los techos presupuestarios tambien
@@ -203,7 +233,7 @@ def _sembrar_catalogo_y_techos(conn):
         ).fetchone()
         if not hay_catalogo:
             try:
-                resumen = db.importar_catalogo(conn, _descargar_excel_drive(catalogo_url), ANIO_FISCAL)
+                resumen = db.importar_catalogo(conn, _descargar_excel_drive_con_limite(catalogo_url), ANIO_FISCAL)
                 log.info("Catálogo auto-restaurado desde CATALOGO_XLSX_URL: %s", resumen)
             except Exception as exc:
                 log.warning("No se pudo auto-restaurar el catálogo desde CATALOGO_XLSX_URL: %s", exc)
@@ -215,7 +245,7 @@ def _sembrar_catalogo_y_techos(conn):
         ).fetchone()
         if not hay_techos:
             try:
-                resumen = db.importar_techos(conn, _descargar_excel_drive(techos_url), ANIO_FISCAL,
+                resumen = db.importar_techos(conn, _descargar_excel_drive_con_limite(techos_url), ANIO_FISCAL,
                                               fuentes=FUENTES_HABILITADAS)
                 log.info("Techos auto-restaurados desde TECHOS_XLSX_URL: %s", resumen)
             except Exception as exc:
