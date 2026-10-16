@@ -30,6 +30,7 @@ Variables de entorno:
                            Render sin disco persistente borra la base en cada reset)
     Drive: ver el docstring de integrations.py (DRIVE_APPS_SCRIPT_URL, DRIVE_TOKEN, REQUIRE_DRIVE_UPLOAD)
 """
+import base64
 import hashlib
 import logging
 import os
@@ -91,6 +92,7 @@ def _preparar_base():
             _sembrar_admins_fijos(conn)
             _sembrar_areas(conn)
             _sembrar_catalogo_y_techos(conn)
+            _restaurar_cargas_desde_drive(conn)
     except db.DbError as exc:
         log.warning("No se pudo preparar la base: %s", exc)
 
@@ -190,33 +192,37 @@ def _descargar_excel_drive(url_o_id, timeout=20):
         return resp.read()
 
 
-def _descargar_excel_drive_con_limite(url_o_id, timeout=20):
-    """Igual que _descargar_excel_drive, pero con un limite de tiempo real
-    (wall-clock) que no depende de que urlopen lo respete: el timeout que
-    recibe urlopen solo cubre la lectura del socket una vez conectado, NO
-    la resolucion DNS previa -- un DNS colgado deja el hilo principal
-    esperando sin limite, y como esto corre al arrancar (import de este
-    modulo, antes de que Flask escuche ningun puerto), un cuelgue asi tira
-    abajo el deploy entero (Render lo mata por "Port scan timeout" a los
-    varios minutos). Correrlo en un hilo aparte con join(timeout) acota el
-    arranque pase lo que pase adentro; si se cuelga, el hilo queda huerfano
-    pero el proceso principal sigue."""
+def _con_limite_de_tiempo(func, *args, limite, **kwargs):
+    """Corre func(*args, **kwargs) en un hilo aparte con un limite de tiempo
+    real (wall-clock) que no depende de que la funcion respete ningun
+    timeout propio: el timeout de urlopen, por ejemplo, solo cubre la
+    lectura del socket una vez conectado, NO la resolucion DNS previa -- un
+    DNS colgado deja el hilo principal esperando sin limite, y como esto
+    corre al arrancar (import de este modulo, antes de que Flask escuche
+    ningun puerto), un cuelgue asi tira abajo el deploy entero (Render lo
+    mata por "Port scan timeout" a los varios minutos, visto en un log real
+    de deploy). Si se cuelga, el hilo queda huerfano pero el proceso
+    principal sigue."""
     resultado = {}
 
     def _trabajo():
         try:
-            resultado["contenido"] = _descargar_excel_drive(url_o_id, timeout=timeout)
+            resultado["valor"] = func(*args, **kwargs)
         except Exception as exc:
             resultado["error"] = exc
 
     hilo = threading.Thread(target=_trabajo, daemon=True)
     hilo.start()
-    hilo.join(timeout=timeout + 10)
+    hilo.join(timeout=limite)
     if hilo.is_alive():
-        raise TimeoutError(f"La descarga no respondio en {timeout + 10}s (posible cuelgue de DNS/red)")
+        raise TimeoutError(f"No respondio en {limite}s (posible cuelgue de DNS/red)")
     if "error" in resultado:
         raise resultado["error"]
-    return resultado["contenido"]
+    return resultado["valor"]
+
+
+def _descargar_excel_drive_con_limite(url_o_id, timeout=20):
+    return _con_limite_de_tiempo(_descargar_excel_drive, url_o_id, timeout=timeout, limite=timeout + 10)
 
 
 def _sembrar_catalogo_y_techos(conn):
@@ -250,6 +256,95 @@ def _sembrar_catalogo_y_techos(conn):
                 log.info("Techos auto-restaurados desde TECHOS_XLSX_URL: %s", resumen)
             except Exception as exc:
                 log.warning("No se pudo auto-restaurar los techos desde TECHOS_XLSX_URL: %s", exc)
+
+
+def _restaurar_cargas_desde_drive(conn):
+    """A diferencia del catalogo/techos, que Excel de Drive representa en si
+    mismo, los Excel que ya subieron las areas (f7_submission, f7_carga_excel)
+    no tienen ningun otro respaldo: si no se reconstruyen, un reset de
+    Render los pierde enteros aunque el archivo aprobado siga guardado en
+    Drive. Esto lee cada Excel aprobado que ya esta en Drive y, si esa
+    Secretaria+Categoria todavia no tiene una carga registrada en esta
+    base nueva, la vuelve a leer con el mismo pipeline que una carga en
+    vivo (excel_import.leer_formulario) para reconstruirla. No vuelve a
+    validar contra el techo actual -- ya se aprobo una vez, y un techo que
+    cambio despues no debe "deshacer" una carga historica -- asi que un
+    Excel que ahora de error simplemente se salta (se loguea) en vez de
+    bloquear el arranque entero. Requiere el Apps Script v3+ (accion
+    "listar"); con uno mas viejo no hace nada (ver integrations.py)."""
+    try:
+        archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=30)
+    except Exception as exc:
+        log.warning("No se pudieron listar los Excel de Drive para restaurar cargas: %s", exc)
+        return
+    if not archivos:
+        return
+
+    secretarias = conn.execute("SELECT id, nombre, jur, subjurisdiccion FROM secretaria").fetchall()
+    carpeta_a_secretaria = {
+        integrations.nombre_carpeta(s["jur"], s["nombre"]): dict(s) for s in secretarias
+    }
+    fuentes_activas = {f["id"] for f in db.listar_fuentes(conn) if f["activa"]}
+    catalogo = db.listar_catalogo(conn, ANIO_FISCAL)
+
+    restauradas = 0
+    for archivo in archivos:
+        secretaria = carpeta_a_secretaria.get(archivo.get("carpeta"))
+        nombre = archivo.get("nombre") or ""
+        if not secretaria or not nombre.lower().endswith(".xlsx"):
+            continue
+        categoria = nombre[:-5]
+        secretaria_id = secretaria["id"]
+
+        ya_existe = conn.execute(
+            "SELECT 1 FROM f7_submission WHERE secretaria_id = ? AND categoria = ? AND anio_fiscal = ?",
+            (secretaria_id, categoria, ANIO_FISCAL),
+        ).fetchone()
+        if ya_existe:
+            continue
+
+        cuotas = {c["fuente"] for c in db.listar_cuotas_de_categoria(conn, secretaria_id, categoria, ANIO_FISCAL)}
+        if not cuotas:
+            continue  # esa Secretaria ya no tiene techo para esta Categoria
+
+        usuario_area = conn.execute(
+            "SELECT id FROM usuario WHERE secretaria_id = ? AND rol = 'area' LIMIT 1", (secretaria_id,)
+        ).fetchone()
+        if usuario_area is None:
+            continue  # submitted_by/subido_por son NOT NULL
+
+        try:
+            contenido = base64.b64decode(archivo["contenido"])
+            lectura = excel_import.leer_formulario(
+                contenido, categoria=categoria, catalogo=catalogo,
+                fuentes_categoria=cuotas, fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,
+            )
+            if lectura["errores"]:
+                raise ValueError(f"{len(lectura['errores'])} error(es) al releerlo")
+            items_por_fuente = defaultdict(list)
+            for item in lectura["items"]:
+                items_por_fuente[item["fuente"]].append(item)
+            subjurisdiccion = secretaria["subjurisdiccion"] or lectura["subjurisdiccion"]
+            db.reemplazar_formularios_de_categoria(
+                conn, secretaria_id=secretaria_id, categoria=categoria, anio_fiscal=ANIO_FISCAL,
+                items_por_fuente=items_por_fuente, fuentes_activas=fuentes_activas,
+                subjurisdiccion=subjurisdiccion, programa=lectura["programa"],
+                submitted_by=usuario_area["id"],
+            )
+            total_general = float(sum(lectura["totales_por_fuente"].values(), Decimal(0)))
+            db.registrar_carga_excel(
+                conn, secretaria_id=secretaria_id, categoria=categoria, anio_fiscal=ANIO_FISCAL,
+                nombre_archivo=nombre, sha256=hashlib.sha256(contenido).hexdigest(), estado="aprobado",
+                errores=None, total=total_general, subido_por=usuario_area["id"],
+                drive_file_id=archivo.get("id"), drive_link=archivo.get("url"),
+            )
+            restauradas += 1
+        except Exception as exc:
+            log.warning("No se pudo restaurar desde Drive secretaria_id=%s categoria=%s: %s",
+                        secretaria_id, categoria, exc)
+
+    if restauradas:
+        log.info("Cargas restauradas desde Drive: %s", restauradas)
 
 
 _preparar_base()

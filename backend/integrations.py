@@ -91,3 +91,32 @@ def subir_a_drive(nombre, contenido, carpeta):
     if not datos.get("ok"):
         raise IntegracionError(f"Drive no guardó el Excel: {datos.get('error', 'sin detalle')}")
     return {"id": datos["id"], "webViewLink": datos.get("url")}
+
+
+def listar_archivos_drive():
+    """Todos los Excel aprobados que hay guardados en Drive ahora mismo (una
+    subcarpeta por jurisdiccion, un archivo por categoria), con su contenido.
+    Lo usa app.py al arrancar para reconstruir que cargo cada area -- eso no
+    tiene ningun otro respaldo, a diferencia del catalogo/techos, y se pierde
+    entero en cada reset de Render (ver _restaurar_cargas_desde_drive).
+    Devuelve [] si Drive no esta configurado. Requiere el Apps Script v3+
+    (accion "listar"); con uno mas viejo tira IntegracionError."""
+    if not drive_configurado():
+        return []
+    cuerpo = json.dumps({"token": os.environ["DRIVE_TOKEN"], "accion": "listar"}).encode("utf-8")
+    pedido = urllib.request.Request(
+        os.environ["DRIVE_APPS_SCRIPT_URL"], data=cuerpo, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(pedido, timeout=TIMEOUT_DRIVE) as respuesta:
+            texto = respuesta.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise IntegracionError(f"No se pudo listar los Excel de Drive: {exc}") from exc
+    try:
+        datos = json.loads(texto)
+    except ValueError:
+        raise IntegracionError("Drive contestó algo que no es la respuesta del script.") from None
+    if not datos.get("ok"):
+        raise IntegracionError(f"Drive no pudo listar los archivos: {datos.get('error', 'sin detalle')}")
+    return datos.get("archivos", [])
