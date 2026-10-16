@@ -14,13 +14,16 @@
 const CARPETA_ID = "13tEsPkFBoMysSdxdqQtC2s0LwuAqsGec";
 const TOKEN = "CAMBIAR-POR-UNA-CLAVE-LARGA";  // la misma que DRIVE_TOKEN en el backend; no la subas al repo
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const VERSION = 2;  // el backend la ve en cada respuesta
+const VERSION = 3;  // el backend la ve en cada respuesta
 
 function doPost(e) {
   try {
     const datos = JSON.parse(e.postData.contents);
     if (datos.token !== TOKEN) {
       return responder({ ok: false, error: "clave inválida" });
+    }
+    if (datos.accion === "listar") {
+      return listarArchivos();
     }
     const nombre = String(datos.nombre || "");
     const subcarpeta = String(datos.carpeta || "").trim();
@@ -55,6 +58,33 @@ function doPost(e) {
   } catch (err) {
     return responder({ ok: false, error: String(err) });
   }
+}
+
+// Lista todos los Excel aprobados (una subcarpeta por jurisdiccion, un
+// archivo por categoria) con su contenido en base64 -- el backend la usa al
+// arrancar para reconstruir que cargo cada area, porque eso NO tiene ningun
+// otro respaldo (a diferencia del catalogo/techos) y se pierde entero en
+// cada reset de Render.
+function listarArchivos() {
+  const raiz = DriveApp.getFolderById(CARPETA_ID);
+  const archivos = [];
+  const carpetas = raiz.getFolders();
+  while (carpetas.hasNext()) {
+    const carpeta = carpetas.next();
+    const nombreCarpeta = carpeta.getName();
+    const files = carpeta.getFilesByType(MIME_XLSX);
+    while (files.hasNext()) {
+      const archivo = files.next();
+      archivos.push({
+        carpeta: nombreCarpeta,
+        nombre: archivo.getName(),
+        id: archivo.getId(),
+        url: archivo.getUrl(),
+        contenido: Utilities.base64Encode(archivo.getBlob().getBytes()),
+      });
+    }
+  }
+  return responder({ ok: true, archivos: archivos });
 }
 
 function responder(datos) {
