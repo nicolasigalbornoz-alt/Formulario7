@@ -273,7 +273,17 @@ def _restaurar_cargas_desde_drive(conn):
     bloquear el arranque entero. Requiere el Apps Script v3+ (accion
     "listar"); con uno mas viejo no hace nada (ver integrations.py)."""
     try:
-        archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=30)
+        # El limite tiene que ser mayor al timeout interno de urlopen
+        # (integrations.TIMEOUT_DRIVE) -- si no, el wall-clock corta ANTES
+        # de que ese timeout tenga chance de disparar en una respuesta lenta
+        # pero normal (listar todos los Excel aprobados, no solo uno, le
+        # puede llevar unos segundos mas a Apps Script del lado de Google),
+        # y lo que deberia ser un backstop solo para un cuelgue de DNS
+        # termina cortando arranques legitimos. Paso real: con 30s acá
+        # (menor a los 60s de TIMEOUT_DRIVE) una restauracion que habia
+        # tardado ~40s en total la vez anterior corto en 0 cargas restauradas
+        # una vez y funciono bien la siguiente, pura casualidad de timing.
+        archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=integrations.TIMEOUT_DRIVE + 10)
     except Exception as exc:
         log.warning("No se pudieron listar los Excel de Drive para restaurar cargas: %s", exc)
         return
