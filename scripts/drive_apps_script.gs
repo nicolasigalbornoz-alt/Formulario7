@@ -14,7 +14,7 @@
 const CARPETA_ID = "13tEsPkFBoMysSdxdqQtC2s0LwuAqsGec";
 const TOKEN = "CAMBIAR-POR-UNA-CLAVE-LARGA";  // la misma que DRIVE_TOKEN en el backend; no la subas al repo
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const VERSION = 3;  // el backend la ve en cada respuesta
+const VERSION = 4;  // el backend la ve en cada respuesta
 
 function doPost(e) {
   try {
@@ -24,6 +24,9 @@ function doPost(e) {
     }
     if (datos.accion === "listar") {
       return listarArchivos();
+    }
+    if (datos.accion === "descargar") {
+      return descargarArchivo(String(datos.id || ""));
     }
     const nombre = String(datos.nombre || "");
     const subcarpeta = String(datos.carpeta || "").trim();
@@ -61,10 +64,15 @@ function doPost(e) {
 }
 
 // Lista todos los Excel aprobados (una subcarpeta por jurisdiccion, un
-// archivo por categoria) con su contenido en base64 -- el backend la usa al
-// arrancar para reconstruir que cargo cada area, porque eso NO tiene ningun
-// otro respaldo (a diferencia del catalogo/techos) y se pierde entero en
-// cada reset de Render.
+// archivo por categoria) -- SIN su contenido, a proposito: el backend la
+// usa al arrancar para reconstruir que cargo cada area (eso NO tiene ningun
+// otro respaldo, a diferencia del catalogo/techos, y se pierde entero en
+// cada reset de Render), y los Excel reales pueden pesar varios cientos de
+// KB cada uno -- mandar el contenido en base64 de TODOS juntos en una sola
+// respuesta puede superar el limite de tamaño de una respuesta de Apps
+// Script a medida que se suman mas Secretarias y categorias, cortando la
+// restauracion entera sin aviso. Por eso el contenido se trae aparte, un
+// archivo a la vez, con descargarArchivo().
 function listarArchivos() {
   const raiz = DriveApp.getFolderById(CARPETA_ID);
   const archivos = [];
@@ -80,11 +88,25 @@ function listarArchivos() {
         nombre: archivo.getName(),
         id: archivo.getId(),
         url: archivo.getUrl(),
-        contenido: Utilities.base64Encode(archivo.getBlob().getBytes()),
       });
     }
   }
   return responder({ ok: true, archivos: archivos });
+}
+
+// Contenido en base64 de un solo archivo, por id -- la contraparte liviana
+// de listarArchivos(). Un archivo a la vez: si uno falla o pesa demasiado,
+// no se pierden los demas.
+function descargarArchivo(id) {
+  if (!id) {
+    return responder({ ok: false, error: "falta el id del archivo" });
+  }
+  try {
+    const archivo = DriveApp.getFileById(id);
+    return responder({ ok: true, contenido: Utilities.base64Encode(archivo.getBlob().getBytes()) });
+  } catch (err) {
+    return responder({ ok: false, error: String(err) });
+  }
 }
 
 function responder(datos) {

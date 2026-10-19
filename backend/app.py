@@ -30,7 +30,6 @@ Variables de entorno:
                            Render sin disco persistente borra la base en cada reset)
     Drive: ver el docstring de integrations.py (DRIVE_APPS_SCRIPT_URL, DRIVE_TOKEN, REQUIRE_DRIVE_UPLOAD)
 """
-import base64
 import hashlib
 import logging
 import os
@@ -258,6 +257,9 @@ def _sembrar_catalogo_y_techos(conn):
                 log.warning("No se pudo auto-restaurar los techos desde TECHOS_XLSX_URL: %s", exc)
 
 
+TIMEOUT_DESCARGA_INDIVIDUAL = 20  # un Excel real pesa unos cientos de KB; sobra margen
+
+
 def _restaurar_cargas_desde_drive(conn):
     """A diferencia del catalogo/techos, que Excel de Drive representa en si
     mismo, los Excel que ya subieron las areas (f7_submission, f7_carga_excel)
@@ -270,10 +272,18 @@ def _restaurar_cargas_desde_drive(conn):
     validar contra el techo actual -- ya se aprobo una vez, y un techo que
     cambio despues no debe "deshacer" una carga historica -- asi que un
     Excel que ahora de error simplemente se salta (se loguea) en vez de
-    bloquear el arranque entero. Requiere el Apps Script v3+ (accion
-    "listar"); con uno mas viejo no hace nada (ver integrations.py)."""
+    bloquear el arranque entero.
+
+    El listado (liviano, solo nombres) y el contenido de cada archivo
+    (pesado, un Excel real puede pesar varios cientos de KB) se piden por
+    separado -- pedir el contenido de TODOS los archivos en una sola
+    respuesta puede superar el limite de tamaño de Apps Script a medida que
+    se suman mas Secretarias y categorias, y cortar la restauracion entera
+    sin aviso (paso de verdad con nueve Secretarias ya cargadas). Requiere
+    el Apps Script v4+ (acciones "listar"/"descargar"); con uno mas viejo no
+    hace nada (ver integrations.py)."""
     try:
-        archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=30)
+        archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=integrations.TIMEOUT_DRIVE + 10)
     except Exception as exc:
         log.warning("No se pudieron listar los Excel de Drive para restaurar cargas: %s", exc)
         return
@@ -313,8 +323,23 @@ def _restaurar_cargas_desde_drive(conn):
         if usuario_area is None:
             continue  # submitted_by/subido_por son NOT NULL
 
+        # La descarga de ESTE archivo va en su propio try/except, separada
+        # del parseo: un fallo de red/DNS ahi es motivo para dejar de
+        # intentar con los archivos que quedan (van a fallar igual, y
+        # 67 categorias x un timeout cada una se suma rapido), mientras que
+        # un Excel puntual que no parsea bien solo se salta a si mismo.
         try:
-            contenido = base64.b64decode(archivo["contenido"])
+            contenido = _con_limite_de_tiempo(
+                integrations.descargar_archivo_drive, archivo.get("id"),
+                limite=TIMEOUT_DESCARGA_INDIVIDUAL,
+            )
+        except Exception as exc:
+            log.warning("No se pudo descargar de Drive secretaria_id=%s categoria=%s -- "
+                        "dejando de intentar con los archivos que quedan: %s",
+                        secretaria_id, categoria, exc)
+            break
+
+        try:
             lectura = excel_import.leer_formulario(
                 contenido, categoria=categoria, catalogo=catalogo,
                 fuentes_categoria=cuotas, fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,

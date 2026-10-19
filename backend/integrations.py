@@ -93,17 +93,8 @@ def subir_a_drive(nombre, contenido, carpeta):
     return {"id": datos["id"], "webViewLink": datos.get("url")}
 
 
-def listar_archivos_drive():
-    """Todos los Excel aprobados que hay guardados en Drive ahora mismo (una
-    subcarpeta por jurisdiccion, un archivo por categoria), con su contenido.
-    Lo usa app.py al arrancar para reconstruir que cargo cada area -- eso no
-    tiene ningun otro respaldo, a diferencia del catalogo/techos, y se pierde
-    entero en cada reset de Render (ver _restaurar_cargas_desde_drive).
-    Devuelve [] si Drive no esta configurado. Requiere el Apps Script v3+
-    (accion "listar"); con uno mas viejo tira IntegracionError."""
-    if not drive_configurado():
-        return []
-    cuerpo = json.dumps({"token": os.environ["DRIVE_TOKEN"], "accion": "listar"}).encode("utf-8")
+def _llamar_apps_script(cuerpo_dict):
+    cuerpo = json.dumps(cuerpo_dict).encode("utf-8")
     pedido = urllib.request.Request(
         os.environ["DRIVE_APPS_SCRIPT_URL"], data=cuerpo, method="POST",
         headers={"Content-Type": "application/json"},
@@ -112,11 +103,41 @@ def listar_archivos_drive():
         with urllib.request.urlopen(pedido, timeout=TIMEOUT_DRIVE) as respuesta:
             texto = respuesta.read().decode("utf-8")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise IntegracionError(f"No se pudo listar los Excel de Drive: {exc}") from exc
+        raise IntegracionError(f"No se pudo conectar con Drive: {exc}") from exc
     try:
         datos = json.loads(texto)
     except ValueError:
         raise IntegracionError("Drive contestó algo que no es la respuesta del script.") from None
     if not datos.get("ok"):
-        raise IntegracionError(f"Drive no pudo listar los archivos: {datos.get('error', 'sin detalle')}")
+        raise IntegracionError(datos.get("error", "sin detalle"))
+    return datos
+
+
+def listar_archivos_drive():
+    """Todos los Excel aprobados que hay guardados en Drive ahora mismo (una
+    subcarpeta por jurisdiccion, un archivo por categoria) -- SIN su
+    contenido, a proposito (ver descargar_archivo_drive): los Excel reales
+    pueden pesar varios cientos de KB cada uno, y mandarlos todos juntos en
+    una sola respuesta puede superar el limite de tamaño de Apps Script a
+    medida que se suman mas Secretarias y categorias (paso de verdad: con
+    nueve Secretarias ya cargadas, una restauracion entera corto sin avisar).
+    Lo usa app.py al arrancar para reconstruir que cargo cada area -- eso no
+    tiene ningun otro respaldo, a diferencia del catalogo/techos, y se pierde
+    entero en cada reset de Render (ver _restaurar_cargas_desde_drive).
+    Devuelve [] si Drive no esta configurado. Requiere el Apps Script v4+
+    (acciones "listar"/"descargar"); con uno mas viejo tira IntegracionError
+    (o, con la v3 que todavia manda "contenido" en la lista, lo ignora: ver
+    descargar_archivo_drive)."""
+    if not drive_configurado():
+        return []
+    datos = _llamar_apps_script({"token": os.environ["DRIVE_TOKEN"], "accion": "listar"})
     return datos.get("archivos", [])
+
+
+def descargar_archivo_drive(file_id):
+    """Contenido en base64-decodificado de un solo archivo de Drive por id --
+    la contraparte liviana de listar_archivos_drive(): se trae un archivo a
+    la vez, asi uno que falla o pesa demasiado no tira abajo la restauracion
+    de los demas. Requiere el Apps Script v4+ (accion "descargar")."""
+    datos = _llamar_apps_script({"token": os.environ["DRIVE_TOKEN"], "accion": "descargar", "id": file_id})
+    return base64.b64decode(datos["contenido"])
