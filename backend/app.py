@@ -258,6 +258,7 @@ def _sembrar_catalogo_y_techos(conn):
 
 
 TIMEOUT_DESCARGA_INDIVIDUAL = 20  # un Excel real pesa unos cientos de KB; sobra margen
+MAX_FALLOS_DESCARGA_SEGUIDOS = 3  # mas que esto seguidas: probable problema real, no un hueco puntual
 
 
 def _restaurar_cargas_desde_drive(conn):
@@ -281,7 +282,17 @@ def _restaurar_cargas_desde_drive(conn):
     se suman mas Secretarias y categorias, y cortar la restauracion entera
     sin aviso (paso de verdad con nueve Secretarias ya cargadas). Requiere
     el Apps Script v4+ (acciones "listar"/"descargar"); con uno mas viejo no
-    hace nada (ver integrations.py)."""
+    hace nada (ver integrations.py).
+
+    Que la descarga de UN archivo falle (timeout puntual, hueco de red) no
+    implica que las demas vayan a fallar igual -- paso de verdad: un solo
+    archivo colgado a los 20s hizo perder decenas de cargas que estaban
+    bien en Drive, porque antes ante la primera falla se dejaba de intentar
+    con todo lo que quedaba. Ahora un archivo que falla se salta y sigue
+    con el resto; solo se corta si hay varias fallas de descarga seguidas
+    (MAX_FALLOS_DESCARGA_SEGUIDOS), que si es señal de un problema real
+    (Apps Script caido, por ejemplo) y evita un arranque larguisimo
+    reintentando con decenas de categorias que van a fallar igual."""
     try:
         archivos = _con_limite_de_tiempo(integrations.listar_archivos_drive, limite=integrations.TIMEOUT_DRIVE + 10)
     except Exception as exc:
@@ -298,6 +309,7 @@ def _restaurar_cargas_desde_drive(conn):
     catalogo = db.listar_catalogo(conn, ANIO_FISCAL)
 
     restauradas = 0
+    fallos_descarga_seguidos = 0
     for archivo in archivos:
         secretaria = carpeta_a_secretaria.get(archivo.get("carpeta"))
         nombre = archivo.get("nombre") or ""
@@ -324,20 +336,29 @@ def _restaurar_cargas_desde_drive(conn):
             continue  # submitted_by/subido_por son NOT NULL
 
         # La descarga de ESTE archivo va en su propio try/except, separada
-        # del parseo: un fallo de red/DNS ahi es motivo para dejar de
-        # intentar con los archivos que quedan (van a fallar igual, y
-        # 67 categorias x un timeout cada una se suma rapido), mientras que
-        # un Excel puntual que no parsea bien solo se salta a si mismo.
+        # del parseo: un Excel puntual que no parsea bien solo se salta a
+        # si mismo, y un fallo de red/DNS puntual tambien -- la mayoria de
+        # las veces es un hueco de ESE archivo, no de todos los que quedan.
+        # Solo varias fallas de descarga seguidas (ver
+        # MAX_FALLOS_DESCARGA_SEGUIDOS) cortan el resto: ahi si es mas
+        # probable que sea un problema real (Apps Script caido) que vale
+        # la pena no seguir reintentando categoria por categoria.
         try:
             contenido = _con_limite_de_tiempo(
                 integrations.descargar_archivo_drive, archivo.get("id"),
                 limite=TIMEOUT_DESCARGA_INDIVIDUAL,
             )
         except Exception as exc:
-            log.warning("No se pudo descargar de Drive secretaria_id=%s categoria=%s -- "
-                        "dejando de intentar con los archivos que quedan: %s",
-                        secretaria_id, categoria, exc)
-            break
+            fallos_descarga_seguidos += 1
+            log.warning("No se pudo descargar de Drive secretaria_id=%s categoria=%s (falla seguida "
+                        "%s/%s): %s", secretaria_id, categoria, fallos_descarga_seguidos,
+                        MAX_FALLOS_DESCARGA_SEGUIDOS, exc)
+            if fallos_descarga_seguidos >= MAX_FALLOS_DESCARGA_SEGUIDOS:
+                log.warning("%s fallas de descarga seguidas: dejando de intentar con los archivos "
+                            "que quedan.", fallos_descarga_seguidos)
+                break
+            continue
+        fallos_descarga_seguidos = 0
 
         try:
             lectura = excel_import.leer_formulario(
