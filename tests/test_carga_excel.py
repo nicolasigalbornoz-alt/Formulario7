@@ -16,6 +16,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 from pathlib import Path
@@ -452,6 +453,86 @@ class Drive(BaseCarga):
         self.assertEqual(subir.call_args.args[2], "04 - Salud")
         with db.conexion() as conn:
             self.assertEqual(db.aprobadas_sin_drive(conn, ANIO), [])
+
+
+class RestauracionDesdeDrive(BaseCarga):
+    CARPETA = "04 - Salud"
+
+    def _restaurar(self, archivos, contenidos):
+        """archivos: lista de dicts como los de integrations.listar_archivos_drive;
+        contenidos: {id: bytes | Exception} para descargar_archivo_drive."""
+        def descargar(file_id):
+            valor = contenidos[file_id]
+            if isinstance(valor, Exception):
+                raise valor
+            return valor
+
+        with mock.patch.object(app_module.integrations, "listar_archivos_drive", return_value=archivos), \
+                mock.patch.object(app_module.integrations, "descargar_archivo_drive", side_effect=descargar), \
+                db.conexion() as conn:
+            app_module._restaurar_cargas_desde_drive(conn)
+
+    def _archivo(self, categoria, file_id):
+        return {"carpeta": self.CARPETA, "nombre": f"{categoria}.xlsx", "id": file_id, "url": f"https://drive/{file_id}"}
+
+    def test_reconstruye_las_cargas_desde_drive(self):
+        excel = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        self._restaurar([self._archivo("22.01.00", "a")], {"a": excel})
+        subs = self.consultar("SELECT categoria, fuente, estado FROM f7_submission")
+        self.assertEqual([(s["categoria"], s["fuente"]) for s in subs], [("22.01.00", 110)])
+        cargas = self.consultar("SELECT categoria, estado, drive_file_id, drive_link FROM f7_carga_excel")
+        self.assertEqual(cargas, [{"categoria": "22.01.00", "estado": "aprobado", "drive_file_id": "a",
+                                   "drive_link": "https://drive/a"}])
+
+    def test_una_descarga_que_falla_no_frena_las_demas(self):
+        excel = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        self._restaurar(
+            [self._archivo("22.01.00", "a"), self._archivo("22.02.00", "b")],
+            {"a": TimeoutError("colgado"), "b": excel},
+        )
+        self.assertEqual([c["categoria"] for c in self.consultar("SELECT categoria FROM f7_carga_excel")], ["22.02.00"])
+
+    def test_varias_fallas_seguidas_cortan_el_resto(self):
+        excel = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        archivos = [self._archivo("22.01.00", "a"), self._archivo("22.02.00", "b")]
+        with mock.patch.object(app_module, "MAX_FALLOS_DESCARGA_SEGUIDOS", 1):
+            self._restaurar(archivos, {"a": TimeoutError("x"), "b": excel})
+        self.assertEqual(self.consultar("SELECT categoria FROM f7_carga_excel"), [])
+
+    def test_no_pisa_una_carga_que_el_area_ya_hizo(self):
+        nueva = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        self.assertEqual(self.subir(nueva).status_code, 201)
+        vieja = armar_excel(comunes=[comun(110, "ARROZ", 1)])
+        self._restaurar([self._archivo("22.01.00", "a")], {"a": vieja})
+        items = self.consultar("SELECT cantidad FROM f7_item")
+        self.assertEqual([i["cantidad"] for i in items], [10])
+
+    def test_un_excel_que_no_parsea_se_salta_y_sigue(self):
+        excel = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        self._restaurar(
+            [self._archivo("22.01.00", "a"), self._archivo("22.02.00", "b")],
+            {"a": b"no es un excel", "b": excel},
+        )
+        self.assertEqual([c["categoria"] for c in self.consultar("SELECT categoria FROM f7_carga_excel")], ["22.02.00"])
+
+
+class ArranqueEnSegundoPlano(BaseCarga):
+    def test_mientras_inicializa_solo_login_y_sesion_responden(self):
+        with mock.patch.object(app_module, "_inicializando", True), \
+                mock.patch.object(app_module, "_datos_listos", threading.Event()):
+            bloqueado = self.client.get("/api/mis-categorias", headers={"Authorization": f"Bearer {self.tokens['area']}"})
+            self.assertEqual(bloqueado.status_code, 503)
+            self.assertIn("terminando de iniciar", bloqueado.get_json()["error"])
+            self.assertEqual(self.client.get("/api/sesion").status_code, 401)  # sin token: responde, no 503
+            login = self.client.post("/api/login", json={"username": "nadie", "password": "x"})
+            self.assertEqual(login.status_code, 401)
+
+    def test_listos_los_datos_todo_responde(self):
+        listo = threading.Event()
+        listo.set()
+        with mock.patch.object(app_module, "_inicializando", True), mock.patch.object(app_module, "_datos_listos", listo):
+            resp = self.client.get("/api/mis-categorias", headers={"Authorization": f"Bearer {self.tokens['area']}"})
+            self.assertEqual(resp.status_code, 200)
 
 
 class SubidaADrive(unittest.TestCase):

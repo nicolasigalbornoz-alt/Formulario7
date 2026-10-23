@@ -33,6 +33,7 @@ Variables de entorno:
 import hashlib
 import logging
 import os
+import socket
 import sys
 import threading
 import urllib.request
@@ -74,14 +75,14 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_MB_EXCEL * 1024 * 1024
 
 
 def _preparar_base():
-    """Al arrancar: crea el archivo de la base si todavia no existe (hosts
-    sin shell, como Render), lo que le falte a una base hecha con una
-    version anterior de db/schema.sql (p. ej. la tabla `sesion` del login
-    por token, sin la cual el login falla), deja habilitadas solo
-    FUENTES_HABILITADAS y, si vienen ADMIN_USERNAME/ADMIN_PASSWORD y/o
-    SEED_USUARIOS_AREA, crea o reactiva esos usuarios -- necesario en un
-    host sin disco persistente, donde cada reinicio arranca con la base
-    vacia y nadie puede loguearse para crearlos a mano."""
+    """Al arrancar, SOLO lo local y rapido (sin red): crea el archivo de la
+    base si todavia no existe (hosts sin shell, como Render), lo que le
+    falte a una base hecha con una version anterior de db/schema.sql (p. ej.
+    la tabla `sesion` del login por token), deja habilitadas solo
+    FUENTES_HABILITADAS y crea o reactiva los usuarios fijos -- asi el login
+    funciona en cuanto el puerto abre. Lo que depende de Drive (catalogo,
+    techos, cargas ya hechas) va aparte, en segundo plano:
+    _inicializar_datos()."""
     db.asegurar_archivo()
     try:
         with db.conexion() as conn:
@@ -90,10 +91,41 @@ def _preparar_base():
             _sembrar_admin(conn)
             _sembrar_admins_fijos(conn)
             _sembrar_areas(conn)
-            _sembrar_catalogo_y_techos(conn)
-            _restaurar_cargas_desde_drive(conn)
     except db.DbError as exc:
         log.warning("No se pudo preparar la base: %s", exc)
+
+
+# Mientras corre la inicializacion en segundo plano (catalogo + techos desde
+# Drive, ~1-2 min en un arranque con base vacia) el servidor ya escucha y
+# deja loguearse, pero los endpoints que necesitan esos datos contestan 503
+# con un mensaje claro en vez de datos a medias. Con disco persistente la
+# base ya trae todo y esto dura segundos.
+_inicializando = False
+_datos_listos = threading.Event()
+RUTAS_SIN_DATOS = {"/api/login", "/api/logout", "/api/sesion", "/api/salud"}
+
+
+def _inicializar_datos():
+    try:
+        with db.conexion() as conn:
+            _sembrar_catalogo_y_techos(conn)
+    except Exception:
+        log.exception("Fallo la carga inicial de catalogo/techos")
+    finally:
+        _datos_listos.set()
+    # La restauracion de cargas ya hechas NO frena a los usuarios: corre por
+    # su cuenta, item por item, con transacciones cortas.
+    try:
+        with db.conexion() as conn:
+            _restaurar_cargas_desde_drive(conn)
+    except Exception:
+        log.exception("Fallo la restauracion de cargas desde Drive")
+
+
+def _arrancar_inicializacion():
+    global _inicializando
+    _inicializando = True
+    threading.Thread(target=_inicializar_datos, name="inicializacion", daemon=True).start()
 
 
 def _sembrar_admin(conn):
@@ -360,7 +392,19 @@ def _restaurar_cargas_desde_drive(conn):
             continue
         fallos_descarga_seguidos = 0
 
+        # Transaccion corta por archivo (la descarga de arriba ya termino, no
+        # se tiene la base bloqueada mientras se espera a Drive): BEGIN
+        # IMMEDIATE + re-chequeo de "ya existe" para que una carga que un
+        # area haga justo ahora, con el servidor ya en pie, no la pise la
+        # version vieja que vino de Drive.
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute(
+                "SELECT 1 FROM f7_submission WHERE secretaria_id = ? AND categoria = ? AND anio_fiscal = ?",
+                (secretaria_id, categoria, ANIO_FISCAL),
+            ).fetchone():
+                conn.rollback()
+                continue
             lectura = excel_import.leer_formulario(
                 contenido, categoria=categoria, catalogo=catalogo,
                 fuentes_categoria=cuotas, fuentes_activas=fuentes_activas, anio_fiscal=ANIO_FISCAL,
@@ -384,8 +428,10 @@ def _restaurar_cargas_desde_drive(conn):
                 errores=None, total=total_general, subido_por=usuario_area["id"],
                 drive_file_id=archivo.get("id"), drive_link=archivo.get("url"),
             )
+            conn.commit()
             restauradas += 1
         except Exception as exc:
+            conn.rollback()
             log.warning("No se pudo restaurar desde Drive secretaria_id=%s categoria=%s: %s",
                         secretaria_id, categoria, exc)
 
@@ -400,6 +446,10 @@ _preparar_base()
 def _preflight():
     if request.method == "OPTIONS":
         return "", 204
+    if _inicializando and not _datos_listos.is_set() and request.path.startswith("/api/") \
+            and request.path not in RUTAS_SIN_DATOS:
+        return jsonify({"ok": False, "error": "El sistema está terminando de iniciar (carga del catálogo y los "
+                        "techos). Esperá un minuto y volvé a intentar."}), 503
 
 
 @app.after_request
@@ -966,6 +1016,16 @@ def salud():
     return jsonify({"ok": True, "db": str(db._db_path()), "anio_fiscal": ANIO_FISCAL}), 200
 
 
+def _escuchar_en_todas(puerto):
+    """"*" de waitress (IPv4 + IPv6) solo si el host tiene IPv6; si no, falla
+    al bindear -- en ese caso, solo IPv4."""
+    try:
+        socket.socket(socket.AF_INET6, socket.SOCK_STREAM).close()
+    except OSError:
+        return f"0.0.0.0:{puerto}"
+    return f"*:{puerto}"
+
+
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 5190))
     print(f"Formulario7 backend escuchando en http://localhost:{puerto}")
@@ -990,5 +1050,18 @@ if __name__ == "__main__":
     # "::" es dual-stack en Windows por default (IPV6_V6ONLY=0) y cubre
     # IPv4 + IPv6 en todas las interfaces con un solo bind -- mismo
     # comportamiento que ya tenia el server estatico del frontend.
-    host = os.environ.get("HOST", "::")
-    app.run(host=host, port=puerto, debug=False, threaded=True)
+    host = os.environ.get("HOST")
+    _arrancar_inicializacion()
+    try:
+        from waitress import serve
+    except ImportError:
+        # Sin waitress (p. ej. desarrollo local): servidor de Flask.
+        app.run(host=host or "::", port=puerto, debug=False, threaded=True)
+    else:
+        # Servidor WSGI de produccion (en vez del de desarrollo de Werkzeug):
+        # hilos fijos, timeouts de conexion y sin el aviso de "development
+        # server". Mismo comando de arranque: python backend/app.py.
+        # Sin HOST, "*" = todas las interfaces IPv4 e IPv6 que existan (el
+        # bind a "::" a secas falla en hosts sin IPv6).
+        serve(app, listen=f"{host}:{puerto}" if host else _escuchar_en_todas(puerto), threads=8,
+              channel_timeout=120)
