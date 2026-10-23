@@ -118,38 +118,45 @@ este repo -- cada push a `main` lo redeploya solo. URL:
 `https://formulario7.onrender.com`. `API_BASE` en `frontend/js/api.js`
 apunta ahí.
 
-⚠️ El plan Free de Render **no tiene disco persistente**: cada redeploy (o
-cada vez que el servicio se "duerme" por inactividad y despierta) borra
-`db/formulario7.db` entero -- se pierden los usuarios, los techos y los
-Formularios 7 ya cargados (los Excel aprobados sobreviven aparte, en Drive,
-si está configurado -- ver "Drive" abajo). Para que el servicio no arranque
-completamente vacío en cada reset:
+### Configuración recomendada para producción (que no se caiga)
 
-- **Admin**: variables de entorno `ADMIN_USERNAME` y `ADMIN_PASSWORD` en
-  Render (Settings → Environment) -- el backend crea (o reactiva y resetea
-  la contraseña de) ese admin solo al arrancar, sin necesitar shell
-  (`backend/app.py:_sembrar_admin`).
-- **Techos presupuestarios**: no hay shell en el plan Free para correr
-  `scripts/build_cuota_data.py`, así que se suben por API una vez logueado
-  como admin -- `POST /api/admin/importar-techos` (multipart, campo
-  `archivo` con el Excel de techos, mismo formato que `Libro2.xlsx`/hoja
-  "Techos"; opcional `fuentes` en el form, default `"110"`). Ejemplo:
-  ```bash
-  curl -X POST https://formulario7.onrender.com/api/admin/importar-techos \
-    -H "Authorization: Bearer $TOKEN" \
-    -F "archivo=@Libro2.xlsx"
-  ```
-- El **catálogo de bienes** (`formulario 7 2027.xlsx`) no tiene un endpoint
-  equivalente todavía -- hoy solo se importa localmente
-  (`scripts/build_catalogo_data.py`) contra un archivo de base con disco
-  persistente, o manualmente vía el Shell de un plan pago de Render.
+El plan **Free** de Render duerme el servicio tras ~15 min sin tráfico (el
+primer pedido tarda 1-2 min en despertarlo) y **no tiene disco persistente**:
+cada redeploy o sleep borra `db/formulario7.db`. Para un sistema que tiene que
+estar siempre disponible, lo único que lo resuelve de raíz es:
 
-Para uso sostenido sin perder datos en cada sleep, migrar al plan Starter de
-Render (~USD 7/mes, con disco persistente) o mover a Postgres.
+1. **Plan Starter** (o superior) del Web Service: no se duerme.
+2. **Disco persistente** (Settings → Disks → Add Disk, mount path
+   `/var/data`, 1 GB alcanza) y estas variables de entorno:
+   - `FORMULARIO7_DB_PATH=/var/data/formulario7.db`
+   - `FORMULARIO7_CARGAS_DIR=/var/data/cargas`
 
-Como red de respaldo, cada Excel aprobado queda en Drive y además en
-`cargas/` en el servidor (`FORMULARIO7_CARGAS_DIR`) -- esto último tampoco
-sobrevive un reset en el plan Free.
+   Con eso la base sobrevive a redeploys y reinicios; la restauración desde
+   Drive queda solo como red de seguridad.
+3. **Health Check Path**: `/api/salud` (Settings → Health Checks), para que
+   Render reinicie solo el servicio si deja de responder.
+
+Aun sin cambiar de plan, el arranque ya no tarda minutos: el puerto abre en
+segundos (se crean los usuarios fijos al instante) y el catálogo, los techos y
+las cargas ya hechas se recuperan desde Drive **en segundo plano**; mientras
+el catálogo/techos se cargan, los endpoints de datos contestan `503` con un
+mensaje claro y la página de login despierta el servidor y reintenta sola.
+
+Si se queda en el plan Free: crear un monitor externo gratuito
+(UptimeRobot / cron-job.org) que pegue a `https://formulario7.onrender.com/api/salud`
+cada 5 minutos. El workflow `mantener-despierto.yml` **no** alcanza: GitHub
+ejecuta los `schedule` con mucho atraso (en la práctica cada ~4-5 horas).
+
+Sin disco persistente, estos son los respaldos que reconstruyen todo en cada reset:
+
+- **Usuarios** (admin y áreas): fijos en `backend/app.py`
+  (`ADMINS_FIJOS`, `USUARIOS_AREA_FIJOS`).
+- **Catálogo y techos**: `CATALOGO_XLSX_URL` / `TECHOS_XLSX_URL` (Excel en
+  Drive); los techos también se pueden subir a mano con
+  `POST /api/admin/importar-techos` (multipart, campo `archivo`, mismo formato
+  que `Libro2.xlsx`/hoja "Techos").
+- **Formularios ya cargados**: se reconstruyen releyendo cada Excel aprobado
+  guardado en Drive (ver "Drive" abajo).
 
 **Frontend**: publicado en GitHub Pages (`.github/workflows/deploy-pages.yml`,
 se dispara solo con cada push a `main`) -- https://nicolasigalbornoz-alt.github.io/Formulario7/.

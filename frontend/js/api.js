@@ -56,7 +56,9 @@ async function apiFetch(path, options = {}) {
 
   if (!resp.ok) {
     const mensajeNegocio = payload && payload.error;
-    const mensaje = resp.status >= 500 || !mensajeNegocio
+    // 503 = el backend esta arrancando (carga del catalogo/techos): trae su
+    // propio mensaje claro, no es un error para mandar a soporte.
+    const mensaje = (resp.status >= 500 && resp.status !== 503) || !mensajeNegocio
       ? `Error inesperado (${resp.status}). ${SOPORTE_TEXTO}`
       : mensajeNegocio;
     throw new ApiError(resp.status, mensaje, payload || {});
