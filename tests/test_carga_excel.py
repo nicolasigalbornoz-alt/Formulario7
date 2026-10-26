@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -514,6 +515,33 @@ class RestauracionDesdeDrive(BaseCarga):
             {"a": b"no es un excel", "b": excel},
         )
         self.assertEqual([c["categoria"] for c in self.consultar("SELECT categoria FROM f7_carga_excel")], ["22.02.00"])
+
+
+    def test_endpoint_admin_dispara_la_restauracion_a_pedido(self):
+        excel = armar_excel(comunes=[comun(110, "ARROZ", 10)])
+        auth_admin = {"Authorization": f"Bearer {self.tokens['admin']}"}
+        auth_area = {"Authorization": f"Bearer {self.tokens['area']}"}
+        self.assertEqual(self.client.post("/api/admin/restaurar-cargas", headers=auth_area).status_code, 403)
+
+        env = {"DRIVE_APPS_SCRIPT_URL": "https://x", "DRIVE_TOKEN": "t"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(app_module.integrations, "listar_archivos_drive",
+                                  return_value=[self._archivo("22.01.00", "a")]), \
+                mock.patch.object(app_module.integrations, "descargar_archivo_drive", return_value=excel):
+            resp = self.client.post("/api/admin/restaurar-cargas", headers=auth_admin)
+            self.assertEqual(resp.status_code, 202, resp.get_json())
+            for _ in range(100):
+                if not app_module._restauracion_en_curso.locked():
+                    break
+                time.sleep(0.05)
+        self.assertEqual([c["categoria"] for c in self.consultar("SELECT categoria FROM f7_carga_excel")], ["22.01.00"])
+
+    def test_endpoint_rechaza_si_ya_hay_una_en_curso_o_sin_drive(self):
+        auth_admin = {"Authorization": f"Bearer {self.tokens['admin']}"}
+        self.assertEqual(self.client.post("/api/admin/restaurar-cargas", headers=auth_admin).status_code, 400)
+        with mock.patch.dict(os.environ, {"DRIVE_APPS_SCRIPT_URL": "https://x", "DRIVE_TOKEN": "t"}):
+            with app_module._restauracion_en_curso:
+                self.assertEqual(self.client.post("/api/admin/restaurar-cargas", headers=auth_admin).status_code, 409)
 
 
 class ArranqueEnSegundoPlano(BaseCarga):
