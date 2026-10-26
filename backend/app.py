@@ -914,6 +914,33 @@ def restaurar_cargas_endpoint(usuario):
                                            "aparecen en el seguimiento."}), 202
 
 
+@app.route("/api/admin/recargar-catalogo", methods=["POST"])
+@auth.admin_required
+def recargar_catalogo_endpoint(usuario):
+    """Vuelve a importar el catalogo de bienes desde el Excel de Drive
+    (CATALOGO_XLSX_URL) sin reiniciar el servidor: actualiza precios,
+    unidades y denominaciones de los bienes que ya estan. Hasta ahora el
+    catalogo solo se cargaba al arrancar con la base vacia, asi que un
+    cambio de precio en el Excel no llegaba al sistema. No toca las cargas
+    ya hechas."""
+    url = os.environ.get("CATALOGO_XLSX_URL")
+    if not url:
+        return jsonify({"ok": False, "error": "El servidor no tiene configurado CATALOGO_XLSX_URL."}), 400
+    try:
+        contenido = _descargar_excel_drive_con_limite(url)
+    except Exception as exc:
+        log.warning("No se pudo descargar el catalogo para recargarlo: %s", exc)
+        return jsonify({"ok": False, "error": "No se pudo descargar el catálogo desde Drive. Probá de nuevo en un minuto."}), 502
+    try:
+        with db.conexion() as conn:
+            resumen = db.importar_catalogo(conn, contenido, ANIO_FISCAL)
+    except Exception as exc:
+        log.warning("El catalogo descargado no se pudo importar: %s", exc)
+        return jsonify({"ok": False, "error": f"El Excel del catálogo no se pudo importar: {exc}"}), 422
+    log.info("Catalogo recargado por %s: %s", usuario["username"], resumen)
+    return jsonify({"ok": True, "resumen": resumen}), 200
+
+
 @app.route("/api/admin/importar-techos", methods=["POST"])
 @auth.admin_required
 def importar_techos_endpoint(usuario):
