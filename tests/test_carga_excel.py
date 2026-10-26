@@ -544,6 +544,33 @@ class RestauracionDesdeDrive(BaseCarga):
                 self.assertEqual(self.client.post("/api/admin/restaurar-cargas", headers=auth_admin).status_code, 409)
 
 
+    def test_recargar_catalogo_actualiza_precios_sin_reiniciar(self):
+        libro = openpyxl.Workbook()
+        ws = libro.active
+        ws.title = "Listado de bienes"
+        ws.append(["Denominación", "Codigo", "Unidad", "Unidad Nº", "-", "-", "Precio"])
+        ws.append(["ARROZ", CATALOGO["ARROZ"][0], CATALOGO["ARROZ"][1], 1, None, None, 99])
+        salida = io.BytesIO()
+        libro.save(salida)
+        auth_admin = {"Authorization": f"Bearer {self.tokens['admin']}"}
+        auth_area = {"Authorization": f"Bearer {self.tokens['area']}"}
+        self.assertEqual(self.client.post("/api/admin/recargar-catalogo", headers=auth_area).status_code, 403)
+        self.assertEqual(self.client.post("/api/admin/recargar-catalogo", headers=auth_admin).status_code, 400)  # sin URL
+        with mock.patch.dict(os.environ, {"CATALOGO_XLSX_URL": "https://drive/x"}), \
+                mock.patch.object(app_module, "_descargar_excel_drive_con_limite", return_value=salida.getvalue()):
+            resp = self.client.post("/api/admin/recargar-catalogo", headers=auth_admin)
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        self.assertEqual(resp.get_json()["resumen"]["total"], 1)
+        precio = self.consultar("SELECT precio FROM catalogo_bienes WHERE denominacion = 'ARROZ'")[0]["precio"]
+        self.assertEqual(precio, 99)
+
+    def test_recargar_catalogo_avisa_si_drive_falla(self):
+        auth_admin = {"Authorization": f"Bearer {self.tokens['admin']}"}
+        with mock.patch.dict(os.environ, {"CATALOGO_XLSX_URL": "https://drive/x"}), \
+                mock.patch.object(app_module, "_descargar_excel_drive_con_limite", side_effect=TimeoutError("x")):
+            self.assertEqual(self.client.post("/api/admin/recargar-catalogo", headers=auth_admin).status_code, 502)
+
+
 class ArranqueEnSegundoPlano(BaseCarga):
     def test_mientras_inicializa_solo_login_y_sesion_responden(self):
         with mock.patch.object(app_module, "_inicializando", True), \
