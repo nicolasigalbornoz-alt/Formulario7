@@ -115,6 +115,14 @@ def _inicializar_datos():
         _datos_listos.set()
     # La restauracion de cargas ya hechas NO frena a los usuarios: corre por
     # su cuenta, item por item, con transacciones cortas.
+    with _restauracion_en_curso:
+        _restaurar_cargas_con_su_conexion()
+
+
+_restauracion_en_curso = threading.Lock()
+
+
+def _restaurar_cargas_con_su_conexion():
     try:
         with db.conexion() as conn:
             _restaurar_cargas_desde_drive(conn)
@@ -880,6 +888,30 @@ def actualizar_monto_total_endpoint(usuario, secretaria_cuota_total_id):
     log.info("Monto total editado por admin=%s: secretaria_id=%s %s -> %s",
               usuario["username"], actual["secretaria_id"], actual["monto_total"], monto_total)
     return jsonify({"ok": True, "monto_total": monto_total}), 200
+
+
+@app.route("/api/admin/restaurar-cargas", methods=["POST"])
+@auth.admin_required
+def restaurar_cargas_endpoint(usuario):
+    """Vuelve a leer los Excel aprobados que hay en Drive y carga los que
+    todavia no figuran (lo mismo que hace el arranque, pero a pedido: sirve
+    cuando se sumaron archivos a Drive despues del ultimo arranque). Corre en
+    segundo plano -- tarda uno o dos minutos -- y no pisa ninguna carga que
+    ya este en la base; el avance se ve en el seguimiento."""
+    if not integrations.drive_configurado():
+        return jsonify({"ok": False, "error": "Drive no está configurado en el servidor."}), 400
+    if not _restauracion_en_curso.acquire(blocking=False):
+        return jsonify({"ok": False, "error": "Ya hay una restauración en curso, esperá a que termine."}), 409
+
+    def _trabajo():
+        try:
+            _restaurar_cargas_con_su_conexion()
+        finally:
+            _restauracion_en_curso.release()
+
+    threading.Thread(target=_trabajo, name="restaurar-cargas", daemon=True).start()
+    return jsonify({"ok": True, "mensaje": "Restauración iniciada: en uno o dos minutos las cargas de Drive "
+                                           "aparecen en el seguimiento."}), 202
 
 
 @app.route("/api/admin/importar-techos", methods=["POST"])
